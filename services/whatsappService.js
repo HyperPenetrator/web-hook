@@ -11,23 +11,34 @@
  *     Activated if Meta credentials are not present.
  */
 
-const {
-  default: makeWASocket,
-  useMultiFileAuthState,
-  DisconnectReason,
-  fetchLatestBaileysVersion,
-  makeCacheableSignalKeyStore,
-  BufferJSON,
-  initAuthCreds,
-  proto,
-} = require('@whiskeysockets/baileys');
-
 const { createClient } = require('@supabase/supabase-js');
 const { Boom } = require('@hapi/boom');
-const qrcode = require('qrcode-terminal');
 const pino = require('pino');
 const path = require('path');
 const fs = require('fs');
+
+// Dynamically loaded Baileys dependencies
+let makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, BufferJSON, initAuthCreds, proto;
+let qrcode;
+
+function loadBaileys() {
+  try {
+    const baileys = require('@whiskeysockets/baileys');
+    makeWASocket = baileys.default;
+    useMultiFileAuthState = baileys.useMultiFileAuthState;
+    DisconnectReason = baileys.DisconnectReason;
+    fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion;
+    makeCacheableSignalKeyStore = baileys.makeCacheableSignalKeyStore;
+    BufferJSON = baileys.BufferJSON;
+    initAuthCreds = baileys.initAuthCreds;
+    proto = baileys.proto;
+
+    qrcode = require('qrcode-terminal');
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
 
 const logger = require('./logger');
 const matchingService = require('./matchingService');
@@ -151,6 +162,11 @@ async function useSupabaseAuthState(supabaseClient) {
 
 // ─── Baileys Connection Logic ──────────────────────────────────────────────────
 async function connectBaileys() {
+  if (!loadBaileys()) {
+    logger.error('WhatsApp service cannot start in Baileys mode because Baileys dependencies are not installed.');
+    logger.error('To run Baileys mode locally, run: npm install @whiskeysockets/baileys qrcode-terminal');
+    return;
+  }
   logger.info('Initializing WhatsApp client via Baileys (WhatsApp Web protocol)...');
   
   let state, saveCreds;
