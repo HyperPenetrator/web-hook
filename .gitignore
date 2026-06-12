@@ -1,0 +1,24 @@
+node_modules/
+uploads/
+
+# Baileys WhatsApp session (contains private keys — never commit)
+whatsapp_auth_state/
+
+# Google service account credentials (never commit)
+google-credentials.json
+vigilant-sunup-*.json
+*-credentials.json
+*-service-account.json
+
+# Environment secrets
+.env
+
+# Production build output
+client/dist/
+
+# PM2 logs
+logs/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
