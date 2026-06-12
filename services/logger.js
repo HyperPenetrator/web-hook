@@ -1,5 +1,4 @@
 const pino = require('pino');
-const axios = require('axios');
 require('dotenv').config();
 
 const isProd = process.env.NODE_ENV === 'production';
@@ -31,7 +30,16 @@ async function sendAlert(message, error = null) {
     const payload = {
       content: `🚨 **EduHook Link System Alert** 🚨\n**Message:** ${message}\n**Environment:** ${process.env.NODE_ENV || 'development'}${errorDetails}\n**Time:** ${new Date().toISOString()}`
     };
-    await axios.post(webhookUrl, payload);
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
     pinoLogger.info({ msg: 'Alert webhook sent successfully.' });
   } catch (err) {
     pinoLogger.error({ err }, 'Failed to send alert webhook');

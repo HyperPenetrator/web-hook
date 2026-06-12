@@ -28,7 +28,6 @@ const qrcode = require('qrcode-terminal');
 const pino = require('pino');
 const path = require('path');
 const fs = require('fs');
-const axios = require('axios');
 
 const logger = require('./logger');
 const matchingService = require('./matchingService');
@@ -284,31 +283,37 @@ async function sendMessage(phone, text) {
     
     logger.info(`Sending Cloud API WhatsApp message to ${phone}...`);
     try {
-      const response = await axios.post(
+      const response = await fetch(
         `https://graph.facebook.com/v18.0/${phoneId}/messages`,
         {
-          messaging_product: 'whatsapp',
-          recipient_type: 'individual',
-          to: phone,
-          type: 'text',
-          text: {
-            preview_url: false,
-            body: text,
-          },
-        },
-        {
+          method: 'POST',
           headers: {
             Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
           },
+          body: JSON.stringify({
+            messaging_product: 'whatsapp',
+            recipient_type: 'individual',
+            to: phone,
+            type: 'text',
+            text: {
+              preview_url: false,
+              body: text,
+            },
+          }),
         }
       );
-      logger.info(`Cloud API message sent to ${phone}`, { messageId: response.data.messages?.[0]?.id });
-      return response.data;
+      
+      const responseData = await response.json();
+      if (!response.ok) {
+        throw new Error(JSON.stringify(responseData));
+      }
+      
+      logger.info(`Cloud API message sent to ${phone}`, { messageId: responseData.messages?.[0]?.id });
+      return responseData;
     } catch (error) {
-      const errorPayload = error.response?.data || error.message;
       logger.alert(`Meta Cloud API failed to send message to ${phone}`, error);
-      throw new Error(`Meta Cloud API Error: ${JSON.stringify(errorPayload)}`);
+      throw error;
     }
   } else {
     // ── Baileys message send ──
