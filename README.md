@@ -1,3 +1,12 @@
+---
+title: Eduhook Backend
+emoji: 💻
+colorFrom: indigo
+colorTo: red
+sdk: docker
+pinned: false
+---
+
 # ⚡ EduHook Link
 
 > **AI-powered document distribution over WhatsApp — designed for educational institutions.**
@@ -206,3 +215,4 @@ For complete free-tier hosting:
 * **Frontend:** Host on [Vercel](https://vercel.com). Configure the root build folder as `client` and set the build environment variable `VITE_API_URL` pointing to your running backend.
 * **Backend:** Deploy as a Docker container on [Hugging Face Spaces](https://huggingface.co/spaces) using CPU Basic (Free). Set up your secrets matching the `.env` checklist. 
 * **Storage:** Configure a public bucket named `documents` in your Supabase storage portal to securely house uploaded files.
+
