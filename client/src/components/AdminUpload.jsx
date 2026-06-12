@@ -40,7 +40,8 @@ export default function AdminUpload() {
     const token = localStorage.getItem('adminToken');
 
     try {
-      const response = await axios.post('/api/admin/upload', formData, {
+      const apiBase = import.meta.env.VITE_API_URL || '';
+      const response = await axios.post(`${apiBase}/api/admin/upload`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
           'Authorization': `Bearer ${token}`

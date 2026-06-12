@@ -36,7 +36,8 @@ export default function StudentRequest() {
     setSuccess(false);
 
     try {
-      const response = await axios.post('/api/request', { name, phone: digitsOnly, query });
+      const apiBase = import.meta.env.VITE_API_URL || '';
+      const response = await axios.post(`${apiBase}/api/request`, { name, phone: digitsOnly, query });
       const { message, matched_resource } = response.data;
 
       if (matched_resource) {

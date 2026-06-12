@@ -66,7 +66,10 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
 app.use(cors({
   origin: (origin, cb) => {
     // allow server-to-server requests (no origin) and whitelisted origins
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    // allow any *.vercel.app or *.railway.app during testing
+    if (origin.endsWith('.vercel.app') || origin.endsWith('.railway.app')) return cb(null, true);
     cb(new Error(`CORS: origin ${origin} not allowed`));
   },
   methods: ['GET', 'POST'],

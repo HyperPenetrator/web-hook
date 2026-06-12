@@ -25,7 +25,8 @@ export default function AdminLogin() {
     setLoading(true);
 
     try {
-      const response = await axios.post('/api/admin/login', { password });
+      const apiBase = import.meta.env.VITE_API_URL || '';
+      const response = await axios.post(`${apiBase}/api/admin/login`, { password });
       localStorage.setItem('adminToken', response.data.token);
       showNotification('success', 'Logged in successfully!');
       
