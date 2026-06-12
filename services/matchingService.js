@@ -9,14 +9,9 @@
  *   findBestMatch(query) → { fileName, drive_id } | null
  */
 
-const { createClient } = require('@supabase/supabase-js');
+const { getSupabaseClient } = require('./supabaseClient');
 const embeddingService = require('./embeddingService');
 require('dotenv').config();
-
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
 
 /**
  * Converts a free-text query into a vector embedding, then runs a cosine-
@@ -33,6 +28,7 @@ async function findBestMatch(query, threshold = 0.5, count = 1) {
   const queryEmbedding = await embeddingService.generateEmbedding(query);
 
   // 2. Run pgvector similarity search
+  const supabase = getSupabaseClient();
   const { data: matches, error } = await supabase.rpc('match_resources', {
     query_embedding: queryEmbedding,
     match_threshold: threshold,

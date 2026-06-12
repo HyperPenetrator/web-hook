@@ -11,7 +11,7 @@
  *     Activated if Meta credentials are not present.
  */
 
-const { createClient } = require('@supabase/supabase-js');
+const { getSupabaseClient } = require('./supabaseClient');
 const { Boom } = require('@hapi/boom');
 const pino = require('pino');
 const path = require('path');
@@ -177,10 +177,7 @@ async function connectBaileys() {
   
   if (hasSupabase) {
     logger.info('Using Supabase database-backed WhatsApp authentication state...');
-    const supabaseClient = createClient(
-      process.env.SUPABASE_URL,
-      process.env.SUPABASE_ANON_KEY
-    );
+    const supabaseClient = getSupabaseClient();
     const authState = await useSupabaseAuthState(supabaseClient);
     state = authState.state;
     saveCreds = authState.saveCreds;

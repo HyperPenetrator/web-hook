@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const { z } = require('zod');
-const { createClient } = require('@supabase/supabase-js');
+const { getSupabaseClient } = require('../services/supabaseClient');
 require('dotenv').config();
 
 const embeddingService = require('../services/embeddingService');
@@ -24,11 +24,7 @@ if (ADMIN_PASSWORD === 'admin123') {
   logger.warn('WARNING: Using default ADMIN_PASSWORD ("admin123"). Please configure ADMIN_PASSWORD in your .env file.');
 }
 
-// Supabase client — used only in /admin/upload to insert the resource record.
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
+// Supabase client is initialized lazily inside routes where it's needed using getSupabaseClient()
 
 // Configure Multer for memory storage
 const ALLOWED_MIME_TYPES = new Set([
@@ -117,6 +113,7 @@ router.post('/admin/upload', authenticateAdmin, upload.single('file'), async (re
   const { originalname: fileName, mimetype: mimeType, buffer: fileBuffer } = req.file;
 
   try {
+    const supabase = getSupabaseClient();
     // 1. Generate unique file name to prevent collisons in storage
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
     const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');

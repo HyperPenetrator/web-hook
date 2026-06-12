@@ -23,8 +23,8 @@ const logger = require('./services/logger');
 const REQUIRED_ENV = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'GEMINI_API_KEY'];
 const missing = REQUIRED_ENV.filter((k) => !process.env[k]);
 if (missing.length > 0) {
-  logger.alert(`Missing required environment variables: ${missing.join(', ')}. Server starting disabled.`);
-  process.exit(1);
+  logger.alert(`Missing required environment variables: ${missing.join(', ')}.`);
+  logger.warn('Server starting in degraded mode to allow settings configuration and avoid boot loops.');
 }
 
 const express = require('express');
@@ -150,7 +150,7 @@ app.use((err, req, res, next) => {
 // ─── Start server ─────────────────────────────────────────────────────────────
 let server;
 if (require.main === module) {
-  server = app.listen(PORT, () => {
+  server = app.listen(PORT, '0.0.0.0', () => {
     logger.info(`EduHook Link server running on port ${PORT}`);
     logger.info(`Mode    : ${IS_PROD ? 'production' : 'development'}`);
     logger.info(`Status  : http://localhost:${PORT}/whatsapp/status`);
