@@ -335,11 +335,12 @@ async function sendMessage(phone, text) {
     // ── Green API message send ──
     const idInstance = process.env.GREEN_API_ID_INSTANCE;
     const apiTokenInstance = process.env.GREEN_API_TOKEN_INSTANCE;
-    logger.info(`Sending Green API WhatsApp message to ${phone}...`);
+    const greenApiUrl = process.env.GREEN_API_URL || 'https://api.green-api.com';
+    logger.info(`Sending Green API WhatsApp message to ${phone} using API URL ${greenApiUrl}...`);
     try {
       const cleanPhone = phone.replace(/[^\d]/g, ''); // Ensure only digits
       const response = await fetch(
-        `https://api.green-api.com/waInstance${idInstance}/sendMessage/${apiTokenInstance}`,
+        `${greenApiUrl}/waInstance${idInstance}/sendMessage/${apiTokenInstance}`,
         {
           method: 'POST',
           headers: {
