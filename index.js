@@ -5,6 +5,18 @@ if (typeof globalThis.WebSocket === 'undefined') {
 }
 
 require('dotenv').config();
+
+// Sanitize environment variables (remove surrounding quotes and whitespaces)
+for (const key in process.env) {
+  if (typeof process.env[key] === 'string') {
+    let val = process.env[key].trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1).trim();
+    }
+    process.env[key] = val;
+  }
+}
+
 const logger = require('./services/logger');
 
 // ─── Validate required environment variables before anything else ─────────────
@@ -33,6 +45,7 @@ if (process.env.SENTRY_DSN) {
 }
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 const IS_PROD = process.env.NODE_ENV === 'production';
 
