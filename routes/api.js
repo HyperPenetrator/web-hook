@@ -260,9 +260,42 @@ router.get('/webhook', (req, res) => {
 });
 
 // ─── WhatsApp Webhook Event Handler (POST /api/webhook) ─────────────────────
-// Processes incoming student messages from WhatsApp official API.
+// Processes incoming student messages from WhatsApp official API or Green-API.
 router.post('/webhook', async (req, res) => {
   try {
+    // 1. Handle Green-API Webhook
+    if (req.body.typeWebhook === 'incomingMessageReceived') {
+      const { senderData, messageData } = req.body;
+      if (senderData && messageData && messageData.typeMessage === 'textMessage') {
+        const studentPhone = senderData.sender.split('@')[0]; // Extract number without @c.us
+        const textBody = messageData.textMessageData.textMessage;
+        
+        logger.info(`Received WhatsApp Green-API message from ${studentPhone}: "${textBody}"`);
+        
+        try {
+          const match = await matchingService.findBestMatch(textBody);
+          let replyText;
+          if (match) {
+            replyText =
+              `✅ Here is the document you requested: *${match.fileName}*\n\n` +
+              `📎 Download link: ${match.drive_id}`;
+          } else {
+            replyText =
+              `😔 Sorry, I couldn't find a document matching your request.\n\n` +
+              `Try rephrasing — for example: _"leave policy"_, _"exam schedule"_, _"fee structure"_`;
+          }
+
+          await whatsapp.sendMessage(studentPhone, replyText);
+          logger.info(`Replied to WhatsApp Green-API message to ${studentPhone}`);
+        } catch (err) {
+          logger.error(`Error processing Green-API webhook message from ${studentPhone}`, err);
+          await whatsapp.sendMessage(studentPhone, '⚠️ Something went wrong on my end. Please try again in a moment.').catch(() => {});
+        }
+      }
+      return res.sendStatus(200);
+    }
+
+    // 2. Handle Meta Cloud API Webhook
     const entry = req.body.entry;
     if (!entry || entry.length === 0) {
       return res.sendStatus(200);

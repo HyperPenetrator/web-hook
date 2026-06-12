@@ -50,9 +50,12 @@ const BAILEYS_LOG_LEVEL = process.env.BAILEYS_LOG_LEVEL || 'silent';
 // Meta Cloud API variables
 const isCloudMode = !!(process.env.META_WA_ACCESS_TOKEN && process.env.META_WA_PHONE_NUMBER_ID);
 
+// Green API variables
+const isGreenMode = !!(process.env.GREEN_API_ID_INSTANCE && process.env.GREEN_API_TOKEN_INSTANCE);
+
 // ─── Internal state ───────────────────────────────────────────────────────────
 let sock = null;
-let isConnected = isCloudMode; // Cloud mode is always stateless and active
+let isConnected = isCloudMode || isGreenMode; // Stateless modes are active immediately
 let readyResolvers = [];
 
 function flushReadyResolvers() {
@@ -331,6 +334,38 @@ async function sendMessage(phone, text) {
       logger.alert(`Meta Cloud API failed to send message to ${phone}`, error);
       throw error;
     }
+  } else if (isGreenMode) {
+    // ── Green API message send ──
+    const idInstance = process.env.GREEN_API_ID_INSTANCE;
+    const apiTokenInstance = process.env.GREEN_API_TOKEN_INSTANCE;
+    logger.info(`Sending Green API WhatsApp message to ${phone}...`);
+    try {
+      const cleanPhone = phone.replace(/[^\d]/g, ''); // Ensure only digits
+      const response = await fetch(
+        `https://api.green-api.com/waInstance${idInstance}/sendMessage/${apiTokenInstance}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            chatId: `${cleanPhone}@c.us`,
+            message: text,
+          }),
+        }
+      );
+      
+      const responseData = await response.json();
+      if (!response.ok) {
+        throw new Error(JSON.stringify(responseData));
+      }
+      
+      logger.info(`Green API message sent to ${phone}`, { messageId: responseData.idMessage });
+      return responseData;
+    } catch (error) {
+      logger.alert(`Green API failed to send message to ${phone}`, error);
+      throw error;
+    }
   } else {
     // ── Baileys message send ──
     if (!isConnected || !sock) {
@@ -361,6 +396,11 @@ if (isCloudMode) {
   // Trigger ready resolvers immediately
   isConnected = true;
   setTimeout(flushReadyResolvers, 100);
+} else if (isGreenMode) {
+  logger.info('WhatsApp service starting in Green API mode (webhooks always ready).');
+  // Trigger ready resolvers immediately
+  isConnected = true;
+  setTimeout(flushReadyResolvers, 100);
 } else {
   logger.info('WhatsApp service starting in Baileys mode.');
   connectBaileys().catch((err) => {
@@ -373,4 +413,5 @@ module.exports = {
   sendMessage,
   getStatus,
   isCloudMode,
+  isGreenMode,
 };
