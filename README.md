@@ -1,10 +1,11 @@
 ---
-title: Eduhook Backend
-emoji: 💻
-colorFrom: indigo
-colorTo: red
+title: Eduhook Backend V2
+emoji: ⚡
+colorFrom: pink
+colorTo: purple
 sdk: docker
 pinned: false
+license: mit
 ---
 
 # ⚡ EduHook Link
