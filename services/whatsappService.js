@@ -200,6 +200,22 @@ async function connectBaileys() {
 
   sock.ev.on('creds.update', saveCreds);
 
+  // Request pairing code if BOT_PHONE_NUMBER is set and not already registered
+  if (process.env.BOT_PHONE_NUMBER && !sock.authState.creds.registered) {
+    setTimeout(async () => {
+      try {
+        const cleanPhone = process.env.BOT_PHONE_NUMBER.replace(/[^\d]/g, '');
+        const code = await sock.requestPairingCode(cleanPhone);
+        console.log('\n=============================================');
+        console.log(`🔑 [WhatsApp Pairing Code]: ${code}`);
+        console.log('Use this in: Linked Devices -> Link with Phone Number');
+        console.log('=============================================\n');
+      } catch (err) {
+        logger.error('Failed to request pairing code:', err);
+      }
+    }, 5000);
+  }
+
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     if (type !== 'notify') return;
 
@@ -252,7 +268,7 @@ async function connectBaileys() {
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
-    if (qr) {
+    if (qr && !process.env.BOT_PHONE_NUMBER) {
       logger.warn('WhatsApp pairing required. Scan QR code below:');
       console.log('\n📱 [WhatsApp] Scan the QR code below with your WhatsApp app:\n');
       qrcode.generate(qr, { small: true });

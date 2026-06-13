@@ -101,6 +101,9 @@ JWT_SECRET=your-random-jwt-key
 
 # ── WhatsApp Configuration ───────────────────────────────────────────────────
 BAILEYS_LOG_LEVEL=silent
+# Optional: Set this to link using an 8-digit text code instead of scanning a QR code.
+# Format: Country Code + Number (e.g. 919876543210 - no "+" symbol)
+# BOT_PHONE_NUMBER=your_bot_phone_number
 
 # ── Administrative Alert Webhooks (Optional) ──────────────────────────────────
 # ALERT_WEBHOOK_URL=https://discord.com/api/webhooks/your-id
