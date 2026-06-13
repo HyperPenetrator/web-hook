@@ -31,9 +31,12 @@ async function generateEmbedding(text) {
   // 1. Try Gemini API
   if (genAI) {
     try {
-      logger.info('Generating embedding using Gemini API (text-embedding-004)...');
-      const model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
-      const response = await model.embedContent(cleanText || 'empty document');
+      logger.info('Generating embedding using Gemini API (gemini-embedding-001)...');
+      const model = genAI.getGenerativeModel({ model: 'gemini-embedding-001' });
+      const response = await model.embedContent({
+        content: { parts: [{ text: cleanText || 'empty document' }] },
+        outputDimensionality: 768,
+      });
       if (response && response.embedding && response.embedding.values) {
         logger.debug('Successfully generated embedding using Gemini.');
         return response.embedding.values;
