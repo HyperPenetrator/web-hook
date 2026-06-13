@@ -47,15 +47,9 @@ const matchingService = require('./matchingService');
 const AUTH_DIR = path.join(__dirname, '..', 'whatsapp_auth_state');
 const BAILEYS_LOG_LEVEL = process.env.BAILEYS_LOG_LEVEL || 'silent';
 
-// Meta Cloud API variables
-const isCloudMode = !!(process.env.META_WA_ACCESS_TOKEN && process.env.META_WA_PHONE_NUMBER_ID);
-
-// Green API variables
-const isGreenMode = !!(process.env.GREEN_API_ID_INSTANCE && process.env.GREEN_API_TOKEN_INSTANCE);
-
 // ─── Internal state ───────────────────────────────────────────────────────────
 let sock = null;
-let isConnected = isCloudMode || isGreenMode; // Stateless modes are active immediately
+let isConnected = false;
 let readyResolvers = [];
 
 function flushReadyResolvers() {
@@ -230,9 +224,20 @@ async function connectBaileys() {
             `✅ Here is the document you requested: *${match.fileName}*\n\n` +
             `📎 Download link: ${match.drive_id}`;
         } else {
+          let availableList = '';
+          try {
+            const supabaseClient = getSupabaseClient();
+            const { data, error } = await supabaseClient.from('resources').select('name').limit(15);
+            if (data && data.length > 0) {
+              availableList = '\n\n📁 *Available documents in database:*\n' + data.map(r => `• ${r.name}`).join('\n');
+            }
+          } catch (dbErr) {
+            logger.error('Failed to retrieve resource list for WhatsApp fallback:', dbErr);
+          }
+
           replyText =
             `😔 Sorry, I couldn't find a document matching your request.\n\n` +
-            `Try rephrasing — for example: _"leave policy"_, _"exam schedule"_, _"fee structure"_`;
+            `Try rephrasing your query (e.g., matching the keywords of the file you need).` + availableList;
         }
 
         await sendMessage(senderPhone, replyText);
@@ -269,7 +274,20 @@ async function connectBaileys() {
         logger.warn(`WhatsApp connection closed (code ${statusCode}). Reconnecting in 3s...`);
         setTimeout(connectBaileys, 3000);
       } else {
-        logger.alert('WhatsApp client logged out permanently. Authentication state must be cleared.', lastDisconnect?.error);
+        logger.alert('WhatsApp client logged out permanently. Clearing authentication state and generating new QR code...', lastDisconnect?.error);
+        if (hasSupabase) {
+          try {
+            const supabaseClient = getSupabaseClient();
+            await supabaseClient.from('whatsapp_auth').delete().neq('key', 'keep_alive_placeholder');
+          } catch (dbErr) {
+            logger.error('Failed to clear whatsapp_auth table in Supabase:', dbErr);
+          }
+        } else {
+          if (fs.existsSync(AUTH_DIR)) {
+            fs.rmSync(AUTH_DIR, { recursive: true, force: true });
+          }
+        }
+        setTimeout(connectBaileys, 3000);
       }
     }
   });
@@ -285,6 +303,33 @@ function ready() {
   return new Promise((resolve) => readyResolvers.push(resolve));
 }
 
+// Simple queue to pace outbound messages and avoid anti-spam bans
+const messageQueue = [];
+let isProcessingQueue = false;
+
+async function processQueue() {
+  if (isProcessingQueue) return;
+  isProcessingQueue = true;
+
+  while (messageQueue.length > 0) {
+    const { phone, text, resolve, reject } = messageQueue.shift();
+    try {
+      // 2.5-second pacing delay to mimic human behavior
+      await new Promise((r) => setTimeout(r, 2500));
+
+      const jid = `${phone}@s.whatsapp.net`;
+      const result = await sock.sendMessage(jid, { text });
+      logger.info(`Baileys message sent to ${phone}`);
+      resolve(result);
+    } catch (error) {
+      logger.error(`Baileys failed to send message to ${phone}`, error);
+      reject(error);
+    }
+  }
+
+  isProcessingQueue = false;
+}
+
 /**
  * Sends a text message to a WhatsApp number.
  * 
@@ -292,93 +337,13 @@ function ready() {
  * @param {string} text - Message contents.
  */
 async function sendMessage(phone, text) {
-  if (isCloudMode) {
-    // ── Meta Cloud API message send ──
-    const accessToken = process.env.META_WA_ACCESS_TOKEN;
-    const phoneId = process.env.META_WA_PHONE_NUMBER_ID;
-    
-    logger.info(`Sending Cloud API WhatsApp message to ${phone}...`);
-    try {
-      const response = await fetch(
-        `https://graph.facebook.com/v18.0/${phoneId}/messages`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            messaging_product: 'whatsapp',
-            recipient_type: 'individual',
-            to: phone,
-            type: 'text',
-            text: {
-              preview_url: false,
-              body: text,
-            },
-          }),
-        }
-      );
-      
-      const responseData = await response.json();
-      if (!response.ok) {
-        throw new Error(JSON.stringify(responseData));
-      }
-      
-      logger.info(`Cloud API message sent to ${phone}`, { messageId: responseData.messages?.[0]?.id });
-      return responseData;
-    } catch (error) {
-      logger.alert(`Meta Cloud API failed to send message to ${phone}`, error);
-      throw error;
-    }
-  } else if (isGreenMode) {
-    // ── Green API message send ──
-    const idInstance = process.env.GREEN_API_ID_INSTANCE;
-    const apiTokenInstance = process.env.GREEN_API_TOKEN_INSTANCE;
-    const greenApiUrl = process.env.GREEN_API_URL || 'https://api.green-api.com';
-    logger.info(`Sending Green API WhatsApp message to ${phone} using API URL ${greenApiUrl}...`);
-    try {
-      const cleanPhone = phone.replace(/[^\d]/g, ''); // Ensure only digits
-      const response = await fetch(
-        `${greenApiUrl}/waInstance${idInstance}/sendMessage/${apiTokenInstance}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            chatId: `${cleanPhone}@c.us`,
-            message: text,
-          }),
-        }
-      );
-      
-      const responseData = await response.json();
-      if (!response.ok) {
-        throw new Error(JSON.stringify(responseData));
-      }
-      
-      logger.info(`Green API message sent to ${phone}`, { messageId: responseData.idMessage });
-      return responseData;
-    } catch (error) {
-      logger.alert(`Green API failed to send message to ${phone}`, error);
-      throw error;
-    }
-  } else {
-    // ── Baileys message send ──
-    if (!isConnected || !sock) {
-      throw new Error('WhatsApp client is not connected via Baileys. Cannot send message.');
-    }
-    const jid = `${phone}@s.whatsapp.net`;
-    try {
-      const result = await sock.sendMessage(jid, { text });
-      logger.info(`Baileys message sent to ${phone}`);
-      return result;
-    } catch (error) {
-      logger.error(`Baileys failed to send message to ${phone}`, error);
-      throw error;
-    }
+  if (!isConnected || !sock) {
+    throw new Error('WhatsApp client is not connected via Baileys. Cannot send message.');
   }
+  return new Promise((resolve, reject) => {
+    messageQueue.push({ phone, text, resolve, reject });
+    processQueue();
+  });
 }
 
 /**
@@ -389,27 +354,13 @@ function getStatus() {
 }
 
 // ─── Initialization ──────────────────────────────────────────────────────────
-if (isCloudMode) {
-  logger.info('WhatsApp service starting in Meta Cloud API mode (webhooks always ready).');
-  // Trigger ready resolvers immediately
-  isConnected = true;
-  setTimeout(flushReadyResolvers, 100);
-} else if (isGreenMode) {
-  logger.info('WhatsApp service starting in Green API mode (webhooks always ready).');
-  // Trigger ready resolvers immediately
-  isConnected = true;
-  setTimeout(flushReadyResolvers, 100);
-} else {
-  logger.info('WhatsApp service starting in Baileys mode.');
-  connectBaileys().catch((err) => {
-    logger.alert('Fatal failure during WhatsApp socket creation', err);
-  });
-}
+logger.info('WhatsApp service starting in Baileys mode.');
+connectBaileys().catch((err) => {
+  logger.alert('Fatal failure during WhatsApp socket creation', err);
+});
 
 module.exports = {
   ready,
   sendMessage,
   getStatus,
-  isCloudMode,
-  isGreenMode,
 };

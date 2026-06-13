@@ -21,9 +21,8 @@ The backend extracts text from uploaded documents (PDF, DOCX, TXT) and indexes t
 ## 🚀 Key Features
 
 * **AI-Powered Semantic Search:** Students search naturally (*"leave application"*, *"exam timetable"*). The system matches requests using Gemini vector embeddings and PostgreSQL `pgvector` similarity search.
-* **Dual-Mode WhatsApp Delivery:**
-  * **Meta Business Cloud API:** Production-ready official API (stateless).
-  * **Baileys (WA Web Client):** Developer-friendly unofficial protocol via QR-code terminal scan.
+* **Free WhatsApp Delivery (Baileys WA Web Client):** Runs completely free by connecting to a standard WhatsApp line (personal or business) via a QR-code scan in the terminal. No paid enterprise API or template constraints are required.
+* **Pacing & Anti-Spam Queue:** Includes an automatic in-memory queue that processes and throttles outbound message dispatches with a 2.5-second delay to protect the WhatsApp account from automated spam filters.
 * **Database-Backed Session Persistence:** WhatsApp authentication state is automatically saved to Supabase (`whatsapp_auth` table). Ephemeral cloud servers (like Hugging Face Spaces free tier) will remain authenticated across restarts without requiring re-scans.
 * **Secure Admin Upload Portal:** Features password protection, JWT-based session tokens, strict input validation via `zod`, and uploads directly to cloud storage.
 * **Supabase Storage Integration:** Eliminates local filesystem storage (`/uploads`), permitting seamless horizontal scaling.
@@ -46,8 +45,8 @@ The backend extracts text from uploaded documents (PDF, DOCX, TXT) and indexes t
 │              │                    │                  │  │
 │    ┌─────────▼──────┐    ┌────────▼───────┐  ┌───────▼─┐│
 │    │   Supabase DB  │    │  WhatsApp Bot  │  │Supabase ││
-│    │  (pgvector +   │    │  (Baileys /    │  │ Storage ││
-│    │  Auth State)   │    │   Cloud API)   │  │(Bucket) ││
+│    │  (pgvector +   │    │   (Baileys     │  │ Storage ││
+│    │  Auth State)   │    │   WA Client)   │  │(Bucket) ││
 │    └────────────────┘    └────────────────┘  └─────────┘│
 └─────────────────────────────────────────────────────────┘
 ```
@@ -100,10 +99,8 @@ GEMINI_API_KEY=your-gemini-api-key
 ADMIN_PASSWORD=your-strong-portal-password
 JWT_SECRET=your-random-jwt-key
 
-# ── Meta WhatsApp Cloud API (Optional - Activates Cloud API Mode) ─────────────
-# META_WA_ACCESS_TOKEN=your-meta-access-token
-# META_WA_PHONE_NUMBER_ID=your-meta-phone-number-id
-# META_WA_VERIFY_TOKEN=your-webhook-verification-token
+# ── WhatsApp Configuration ───────────────────────────────────────────────────
+BAILEYS_LOG_LEVEL=silent
 
 # ── Administrative Alert Webhooks (Optional) ──────────────────────────────────
 # ALERT_WEBHOOK_URL=https://discord.com/api/webhooks/your-id

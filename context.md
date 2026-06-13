@@ -1,126 +1,103 @@
-# EduHook Link - Application Context & Architecture
+# EduHook Link - Incomplete Features & WhatsApp Scaling Implementation Plan
 
-This document provides a comprehensive overview of the **EduHook Link** codebase, its architectural components, design choices, data schemas, and key integration points. It serves as developer context for maintenance, feature additions, and system updates.
-
----
-
-## 📖 Overview & Purpose
-**EduHook Link** is an AI-powered document distribution platform designed primarily for educational institutions. It allows students to request institutional documents (e.g., fee structures, schedules, syllabi) in natural language and receive secure, direct download links instantly on WhatsApp. 
-
-The system leverages:
-- **Vector Embeddings (Google Gemini API):** For semantic interpretation of student requests.
-- **Supabase (PostgreSQL + pgvector):** For similarity search and persistence of resource metadata and WhatsApp authentication state.
-- **WhatsApp Web (Baileys) or Meta Cloud API:** For communication with the user.
-- **Supabase Storage:** For storing and serving the files securely.
-- **React Frontend:** A portal for students to submit request forms manually, and an administrative portal for uploading and indexing documents.
+This document details the diagnostic analysis of the single-number WhatsApp restriction, lists the current incomplete/degraded features in the system, and provides a structured implementation plan to scale the application to handle 50-100 active numbers.
 
 ---
 
-## 🛠️ Architecture & Data Flow
+## 🔍 Diagnostic: Why the Bot Only Works for `9101390352`
 
-### 1. Document Indexing Flow (Admin Upload)
-1. **Upload:** Admin uploads a document (`.pdf`, `.docx`, `.txt`) through the password-protected Admin Dashboard.
-2. **Text Parsing:** The backend extracts text using specialized parsers (`pdf-parse` / `mammoth`).
-3. **Embedding Generation:** The text is parsed, and an embedding vector (768 dimensions) is generated using the Google Gemini embedding model.
-4. **Storage:**
-   - The document is uploaded to the Supabase Storage public bucket (`documents`).
-   - The resource name, Supabase file URL/ID, and embedding vector are saved into the `resources` table in the PostgreSQL database.
+Based on the [railway-logs.log](file:///d:/Projects/Whatsapp_hook/railway-logs.log), the backend **does** receive incoming requests from other numbers, but fails to respond.
 
-### 2. Request & Retrieval Flow (Student Search / WhatsApp Bot)
-1. **Query:** A student sends a message on WhatsApp (*"can I get the semester fee structure?"*) or types it in the web request form.
-2. **Query Embedding:** The system generates a vector embedding for the student's message using the Gemini API.
-3. **Similarity Search:** A SQL query utilizes PostgreSQL `pgvector` and the cosine distance operator (`<=>`) via the `match_resources` RPC function to find the document with the highest semantic similarity above a defined threshold.
-4. **WhatsApp Delivery:** The bot responds with the best-matching document name and its secure Supabase Storage download link.
+### Key Evidence:
+1. **Successful Delivery:**
+   ```
+   Received WhatsApp Green-API message from 919101390352: "cert"
+   Sending Green API WhatsApp message to 919101390352...
+   Green API message sent to 919101390352
+   ```
+2. **Failed Delivery:**
+   ```
+   Received API request from Romen (918761895085): "cert"
+   Sending Green API WhatsApp message to 918761895085...
+   [ALERT] Green API failed to send message to 918761895085
+   ```
 
----
-
-## 📦 Key Technical Components & Modules
-
-### Core Backend (`index.js`)
-Handles security headers (`helmet`), CORS configuration, rate limits (both global and strict rate limits for document requests), API routes integration, Sentry error tracking initialization, and static serving of the production React build.
-
-### WhatsApp Adapter (`services/whatsappService.js`)
-Supports a **dual-mode** setup:
-1. **Baileys Mode (Default):** Runs an unofficial WhatsApp Web client. To handle hosting in ephemeral environments (like Hugging Face Spaces or container platforms), the authentication state is saved key-by-key in the Supabase database (`whatsapp_auth` table). This prevents the need to re-scan the QR code every time the server restarts.
-2. **Meta Cloud API Mode:** An official API implementation that uses the Webhook endpoint to receive messages and uses Meta endpoints to send messages.
-
-### Matching & Embeddings (`services/matchingService.js` & `services/embeddingService.js`)
-- **`embeddingService.js`:** Connects to `@google/generative-ai` to retrieve embeddings for documents and queries. It includes local tokenization/fallback strategies if required.
-- **`matchingService.js`:** Communicates with the Supabase client to call the SQL function `match_resources` and return candidates above the similarity threshold.
-
-### Parsers (`services/parserService.js`)
-- Handles text extraction based on mime types:
-  - `application/pdf` -> parsed using `pdf-parse`
-  - `application/vnd.openxmlformats-officedocument.wordprocessingml.document` (DOCX) -> parsed using `mammoth`
-  - `text/plain` -> parsed directly.
-
-### Admin & Routes (`routes/api.js`)
-Includes routers for:
-- User manual requests (`/request`).
-- Meta Cloud API WhatsApp webhooks (`/webhook`).
-- Admin Auth (`/admin/login` validating against `ADMIN_PASSWORD` and returning a JWT).
-- Admin Uploads (`/admin/upload` extracting text, generating embeddings, uploading to storage, and inserting metadata into Supabase).
+### Root Cause:
+* **Green API / Meta Cloud Sandbox Restriction:** The application is currently running in developer/sandbox mode. In Green API trial accounts or Meta WhatsApp sandbox setups, the instance is restricted to communicating **only** with authorized numbers (such as the account creator/pairing number `919101390352`). Messages targeted at or incoming from unverified numbers are blocked at the gateway level.
 
 ---
 
-## 💾 Database Schema Reference
+## ⚠️ Incomplete & Degraded Features
 
-The system relies on a PostgreSQL database (ideally hosted on Supabase) configured with the `pgvector` extension.
+Before scaling the app, several architectural bottlenecks and configuration degradation issues must be resolved:
 
-### 1. `resources` Table
-Stores indexed files and their vector representations.
-```sql
-CREATE TABLE resources (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    drive_id TEXT, -- Holds the storage public URL/path key
-    name TEXT,     -- Document name displayed to users
-    embedding VECTOR(768) -- Gemini vector representation
-);
-```
+### 1. Gemini Embedding Service Degradation (Critical)
+* **Status:** Degraded (falling back to local CPU execution).
+* **Details:** The logs show that Gemini API embedding generation fails on every single call:
+  ```
+  [ALERT] Gemini embedding generation failed. Falling back to local Xenova model.
+  ```
+  This forces the server to generate embeddings locally using the CPU-bound Xenova transformer `all-mpnet-base-v2`. Under load from 50-100 numbers, this local fallback will cause massive CPU spikes, slowing response times to several seconds and potentially causing container crashes.
 
-### 2. `whatsapp_auth` Table
-Stores session keys and tokens for Baileys, ensuring that container restarts do not log out the bot.
-```sql
-CREATE TABLE whatsapp_auth (
-    key TEXT PRIMARY KEY,
-    value TEXT
-);
-```
+### 2. Lack of Output Message Queuing
+* **Status:** Incomplete.
+* **Details:** Outbound messages are currently dispatched synchronously. If multiple requests arrive simultaneously, they will trigger API rate limits (WhatsApp/Green API limits message frequency on non-enterprise lines). This leads to dropped webhooks and lost responses.
 
-### 3. `match_resources` Database Function
-```sql
-CREATE OR REPLACE FUNCTION match_resources (
-  query_embedding VECTOR(768),
-  match_threshold FLOAT,
-  match_count INT
-)
-RETURNS TABLE (
-  id UUID,
-  drive_id TEXT,
-  name TEXT,
-  similarity FLOAT
-)
-AS $$
-BEGIN
-  RETURN QUERY
-  SELECT
-    resources.id,
-    resources.drive_id,
-    resources.name,
-    1 - (resources.embedding <=> query_embedding) AS similarity
-  FROM resources
-  WHERE 1 - (resources.embedding <=> query_embedding) > match_threshold
-  ORDER BY resources.embedding <=> query_embedding
-  LIMIT match_count;
-END;
-$$ LANGUAGE plpgsql;
-```
+### 3. Stateless Conversational Flow
+* **Status:** Incomplete.
+* **Details:** The system processes each query as an isolated event. Students cannot ask follow-up questions (e.g., *"What is the deadline?"* after retrieving *"exam_schedule.pdf"*).
+
+### 4. Admin Dashboard Observability Gap
+* **Status:** Incomplete.
+* **Details:** The admin dashboard has no screens for monitoring bot traffic, viewing failed document dispatches, checking webhook logs, or managing WhatsApp connection state.
 
 ---
 
-## ⚙️ Deployment & Environment Details
+## 🚀 Implementation Plan to Scale to 50-100 Numbers
 
-- **Frontend Hosting:** Vercel (or any static provider).
-- **Backend Hosting:** Hugging Face Spaces (via the included `Dockerfile` running PM2) or render/railway.
-- **Storage:** Supabase Storage bucket named `documents` configured for public read access.
-- **Logging:** Structured logging using `pino` with an optional `ALERT_WEBHOOK_URL` to send alert notifications to administrative channels (like Discord or Slack webhooks) during critical errors.
+Below is the step-by-step roadmap to transition the application to a high-capacity, multi-user system.
+
+### Phase 1: Gateway Upgrade (Solve the Single-Number Issue)
+* [ ] **Green API / Meta API Production Activation:**
+  * Upgrade the Green API instance to a paid plan, or complete the Meta WhatsApp Business Account (WABA) verification.
+  * Update environment variables with live credentials (`GREEN_API_ID_INSTANCE` / `GREEN_API_TOKEN_INSTANCE` or live Graph API tokens).
+* [ ] **Domain & Webhook Optimization:**
+  * Ensure the server uses HTTPS (Railway/Vercel handles this automatically).
+  * Configure the live Webhook URL in the provider portal to ensure asynchronous delivery of incoming messages.
+
+### Phase 2: Core Service Hardening
+* [ ] **Fix Gemini API Embedding Engine:**
+  * Verify the validity of `GEMINI_API_KEY` in production environment settings.
+  * Add automatic retry logic with exponential backoff (`p-retry` or custom middleware) in `services/embeddingService.js` to handle transient API rate-limit errors (HTTP 429).
+* [ ] **Database Connection Pooling:**
+  * Since multiple concurrent users will query Supabase PostgreSQL, ensure connection pooling is configured.
+  * Transition database calls to use pgBouncer pooling ports (port `6543`) to prevent connection exhaustion.
+
+### Phase 3: Traffic Control & Message Queueing
+* [ ] **Implement Message Queue (BullMQ / Bottleneck):**
+  * Introduce a lightweight task queuing library (such as `bottleneck` or an in-memory queue) to schedule and throttle outbound messages.
+  * Restrict message dispatch to a safe speed limit (e.g., max 1–2 messages per second) to conform to WhatsApp's anti-spam rules.
+* [ ] **Webhook Immediate Response:**
+  * Hard-code webhook routes to respond with `200 OK` within 500ms of receiving the payload, offloading all matching logic and outbound messaging to the async queue.
+
+### Phase 4: Conversational State & Context Retention
+* [ ] **Add Session State to Supabase:**
+  * Create a `whatsapp_sessions` table in the database to store recent conversation context (e.g., last 3 messages and matched resources) for each student number.
+  * Clean up expired sessions (older than 30 minutes) using a scheduled cron job or Supabase Edge Functions.
+
+### Phase 5: Dashboard Observability
+* [ ] **Implement Traffic Logging & Analytics UI:**
+  * Track incoming requests, execution times, similarity scores, and delivery statuses in a new database logs table.
+  * Build a basic metrics tab in the React Admin dashboard to display success rates and highlight failed message dispatches.
+
+---
+
+## ⚠️ Crucial Rules to Scale to 50-100 Numbers on Baileys (Free Mode)
+
+Because Baileys uses a normal WhatsApp line, you are subject to WhatsApp's anti-spam detection. If you send too many messages to new numbers too fast, your number will get banned. Follow these rules to keep it safe:
+
+* **Use a Dedicated Number:** Never use your personal phone number. Buy a cheap SIM card dedicated exclusively to this bot.
+* **Pacing / Rate Limiting (Queueing):** Do not send 50 messages in the same second. Modify the bot queue to wait 2 to 3 seconds between outbound messages to mimic human behavior.
+* **Warm Up the Number:** If it is a brand-new number, don't message 100 people on day one. Send and receive messages with friendly accounts for a few days to build up "reputation" with WhatsApp's servers.
+* **Get Users to Message You First:** The safest way to prevent bans is to make sure users initiate the chat (which they do by requesting a file). When a user messages you first, WhatsApp's spam detection score drops significantly.
+
