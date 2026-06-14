@@ -97,7 +97,6 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 GEMINI_API_KEY=your-gemini-api-key
 
 # ── Admin Auth Configuration ──────────────────────────────────────────────────
-ADMIN_PASSWORD=your-strong-portal-password
 JWT_SECRET=your-random-jwt-key
 
 # ── WhatsApp Configuration ───────────────────────────────────────────────────
@@ -122,19 +121,29 @@ Run the following SQL in your **Supabase Dashboard SQL Editor** to set up extens
 CREATE SCHEMA IF NOT EXISTS extensions;
 CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions;
 
--- 2. Create resources table
+-- 2. Create admins table
+CREATE TABLE IF NOT EXISTS admins (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 3. Create resources table
 CREATE TABLE IF NOT EXISTS resources (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     drive_id TEXT,
     name TEXT,
-    embedding VECTOR(768)
+    embedding VECTOR(768),
+    admin_id UUID REFERENCES admins(id) ON DELETE CASCADE
 );
 
--- 3. Create similarity matching function
-CREATE OR REPLACE FUNCTION match_resources (
+-- 4. Create similarity matching function
+CREATE OR REPLACE FUNCTION match_resources_v2 (
   query_embedding VECTOR(768),
   match_threshold FLOAT,
-  match_count INT
+  match_count INT,
+  p_admin_id UUID DEFAULT NULL
 )
 RETURNS TABLE (
   id UUID,
@@ -153,14 +162,16 @@ BEGIN
     resources.name,
     1 - (resources.embedding <=> query_embedding) AS similarity
   FROM resources
-  WHERE 1 - (resources.embedding <=> query_embedding) > match_threshold
+  WHERE (p_admin_id IS NULL OR resources.admin_id = p_admin_id)
+    AND 1 - (resources.embedding <=> query_embedding) > match_threshold
   ORDER BY resources.embedding <=> query_embedding
   LIMIT match_count;
 END;
 $$;
 
--- 4. Enable Row Level Security (RLS) on resources
+-- 5. Enable Row Level Security (RLS)
 ALTER TABLE resources ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admins ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Enable read access for all users" ON public.resources;
 CREATE POLICY "Enable read access for all users" ON public.resources 
@@ -169,22 +180,6 @@ CREATE POLICY "Enable read access for all users" ON public.resources
 DROP POLICY IF EXISTS "Enable insert access for all users" ON public.resources;
 CREATE POLICY "Enable insert access for all users" ON public.resources 
     FOR INSERT TO public WITH CHECK (auth.role() IN ('anon', 'authenticated'));
-
--- 5. Create whatsapp_auth table (Stateless Cloud Session persistence)
-CREATE TABLE IF NOT EXISTS whatsapp_auth (
-    key TEXT PRIMARY KEY,
-    value TEXT
-);
-
-ALTER TABLE whatsapp_auth ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Enable all access for anon" ON public.whatsapp_auth;
-CREATE POLICY "Enable all access for anon" ON public.whatsapp_auth
-    FOR ALL TO anon USING (true) WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Enable all access for authenticated" ON public.whatsapp_auth;
-CREATE POLICY "Enable all access for authenticated" ON public.whatsapp_auth
-    FOR ALL TO authenticated USING (true) WITH CHECK (true);
 ```
 
 ---
