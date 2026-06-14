@@ -49,6 +49,10 @@ async function findBestMatch(query, threshold = 0.6, count = 1) {
     throw new Error(`Supabase RPC error: ${error.message}`);
   }
 
+  if (matches) {
+    logger.info(`Database match query similarity scores: ${JSON.stringify(matches.map(m => ({ name: m.name, similarity: m.similarity })))}`);
+  }
+
   let result = null;
   if (matches && matches.length > 0) {
     const best = matches[0];
