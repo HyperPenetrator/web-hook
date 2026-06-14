@@ -28,19 +28,25 @@ async function ready() {
 }
 
 /**
- * Sends a text message using the first available connected session.
+ * Sends a text message using the first available connected session for the given admin.
  * 
+ * @param {string|null} adminId - The admin ID to scope the session. If null, tries any session.
  * @param {string} phone - Recipient phone number or JID.
  * @param {string} text - Message contents.
  */
-async function sendMessage(phone, text) {
+async function sendMessageForAdmin(adminId, phone, text) {
   const sessions = sessionManager.listSessions();
-  const connected = sessions.find(s => s.status === 'connected');
+  // Find a connected session that belongs to this admin
+  const targetPrefix = adminId ? `${adminId}_` : null;
+  const connected = sessions.find(s => 
+    s.status === 'connected' && (!targetPrefix || s.fullId.startsWith(targetPrefix))
+  );
+
   if (!connected) {
-    throw new Error('No active/connected WhatsApp sessions available to send message.');
+    throw new Error(`No active/connected WhatsApp sessions available for admin ${adminId}.`);
   }
 
-  return sessionManager.sendMessage(connected.id, phone, text);
+  return sessionManager.sendMessage(connected.fullId, phone, text);
 }
 
 /**
@@ -53,6 +59,6 @@ function getStatus() {
 
 module.exports = {
   ready,
-  sendMessage,
+  sendMessageForAdmin,
   getStatus,
 };

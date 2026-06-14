@@ -648,7 +648,7 @@
       if (!token) return;
 
       try {
-        const res = await fetch('/admin/sessions', {
+        const res = await fetch('/console/api/sessions', {
           headers: getAuthHeaders()
         });
         if (!res.ok) {
@@ -723,7 +723,7 @@
     async function initSessionCreation() {
       const sessionId = inputSessionId.value.trim();
       try {
-        const res = await fetch('/admin/sessions', {
+        const res = await fetch('/console/api/sessions', {
           method: 'POST',
           headers: getAuthHeaders(),
           body: JSON.stringify({ sessionId })
@@ -754,7 +754,7 @@
 
       const token = localStorage.getItem('adminToken');
       // Pass token as a query parameter for SSE EventSource authentication
-      currentEventSource = new EventSource(`/admin/sessions/${sessionId}/events?token=${token}`);
+      currentEventSource = new EventSource(`/console/api/sessions/${sessionId}/events?token=${token}`);
 
       currentEventSource.addEventListener('qr', (e) => {
         const data = JSON.parse(e.data);
@@ -791,7 +791,7 @@
         return;
       }
       try {
-        const res = await fetch(`/admin/sessions/${id}`, { 
+        const res = await fetch(`/console/api/sessions/${id}`, { 
           method: 'DELETE',
           headers: getAuthHeaders()
         });

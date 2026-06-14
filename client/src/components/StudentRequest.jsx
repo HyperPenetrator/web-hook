@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
 export default function StudentRequest() {
-  const [form, setForm] = useState({ name: '', phone: '', query: '' });
+  const [form, setForm] = useState({ name: '', phone: '', query: '', adminId: '' });
+  const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(false);
   const [notification, setNotification] = useState(null);
   const [success, setSuccess] = useState(false);
@@ -12,15 +13,31 @@ export default function StudentRequest() {
     setTimeout(() => setNotification(null), 6000);
   };
 
+  useEffect(() => {
+    const fetchAdmins = async () => {
+      try {
+        const apiBase = import.meta.env.VITE_API_URL || '';
+        const response = await axios.get(`${apiBase}/api/admins`);
+        setAdmins(response.data || []);
+        if (response.data && response.data.length > 0) {
+          setForm((prev) => ({ ...prev, adminId: response.data[0].id }));
+        }
+      } catch (err) {
+        console.error('Failed to fetch admins:', err);
+      }
+    };
+    fetchAdmins();
+  }, []);
+
   const handleChange = (e) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const { name, phone, query } = form;
+    const { name, phone, query, adminId } = form;
 
-    if (!name.trim() || !phone.trim() || !query.trim()) {
+    if (!name.trim() || !phone.trim() || !query.trim() || !adminId) {
       showNotification('error', 'Please fill in all fields before submitting.');
       return;
     }
@@ -37,13 +54,13 @@ export default function StudentRequest() {
 
     try {
       const apiBase = import.meta.env.VITE_API_URL || '';
-      const response = await axios.post(`${apiBase}/api/request`, { name, phone: digitsOnly, query });
+      const response = await axios.post(`${apiBase}/api/request`, { name, phone: digitsOnly, query, adminId });
       const { message, matched_resource } = response.data;
 
       if (matched_resource) {
         setSuccess(true);
         showNotification('success', `✅ Found! "${matched_resource.fileName}" was sent to your WhatsApp.`);
-        setForm({ name: '', phone: '', query: '' });
+        setForm(prev => ({ ...prev, name: '', phone: '', query: '' }));
       } else {
         showNotification('info', message || 'No matching document found. Try a different search term.');
       }
@@ -94,6 +111,26 @@ export default function StudentRequest() {
       )}
 
       <form onSubmit={handleSubmit} className="form-layout">
+        {/* Select Admin/School */}
+        <div className="form-group">
+          <label htmlFor="req-admin" className="form-label">Select Organization / School</label>
+          <select
+            id="req-admin"
+            name="adminId"
+            value={form.adminId}
+            onChange={handleChange}
+            className="text-input"
+            style={{ width: '100%', padding: '12px', borderRadius: '10px', background: 'rgba(255,255,255,0.05)', color: 'white', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            {admins.length === 0 && <option value="">Loading...</option>}
+            {admins.map(admin => (
+              <option key={admin.id} value={admin.id} style={{ color: 'black' }}>
+                {admin.email}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {/* Name */}
         <div className="form-group">
           <label htmlFor="req-name" className="form-label">Your Name</label>

@@ -110,8 +110,8 @@ app.use('/api', apiRouter);
 
 // ─── Admin Panel Multi-Number Session routes ──────────────────────────────────
 const adminSessions = require('./routes/adminSessions');
-app.use('/admin', adminSessions);
-app.use('/admin', express.static(path.join(__dirname, 'public/admin')));
+app.use('/console/api', adminSessions);
+app.use('/console', express.static(path.join(__dirname, 'public/console')));
 
 // ─── WhatsApp status endpoint ─────────────────────────────────────────────────
 app.get('/whatsapp/status', (req, res) => {

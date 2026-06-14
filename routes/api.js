@@ -72,6 +72,29 @@ function authenticateAdmin(req, res, next) {
   }
 }
 
+// ─── GET /admins ──────────────────────────────────────────────────────────────
+router.get('/admins', async (req, res) => {
+  try {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase
+      .from('admins')
+      .select('id, email')
+      .order('email');
+    
+    if (error) {
+      if (error.code === '42P01') {
+        // Fallback for single admin mode
+        return res.json([{ id: '00000000-0000-0000-0000-000000000000', email: 'Default Admin' }]);
+      }
+      throw new Error(`Database error: ${error.message}`);
+    }
+    res.json(data);
+  } catch (error) {
+    logger.error('Error in GET /api/admins:', error);
+    res.status(500).json({ error: 'Failed to retrieve admins' });
+  }
+});
+
 // ─── POST /admin/register ─────────────────────────────────────────────────────
 router.post('/admin/register', async (req, res) => {
   try {
@@ -287,6 +310,7 @@ router.post('/request', async (req, res) => {
       name: z.string().min(1, 'Name is required').max(100),
       phone: z.string().min(7, 'Phone must be at least 7 digits').max(20),
       query: z.string().min(1, 'Request query is required').max(500),
+      adminId: z.string().uuid().optional().or(z.literal('00000000-0000-0000-0000-000000000000')),
     });
 
     const parseResult = schema.safeParse(req.body);
@@ -295,7 +319,7 @@ router.post('/request', async (req, res) => {
       return res.status(400).json({ error: errorMsg });
     }
 
-    let { name, phone, query } = parseResult.data;
+    let { name, phone, query, adminId } = parseResult.data;
     
     name = name.replace(/[\r\n\t]+/g, ' ').trim();
     phone = phone.replace(/[\s\r\n\t]+/g, '').trim();
@@ -303,10 +327,10 @@ router.post('/request', async (req, res) => {
 
     const normalizedPhone = phone.replace(/[^\d]/g, '');
 
-    logger.info(`Received API request from ${name} (${normalizedPhone}): "${query}"`);
+    logger.info(`Received API request from ${name} (${normalizedPhone}) for admin ${adminId}: "${query}"`);
 
-    // Public request queries across all resources (passing null for adminId)
-    const match = await matchingService.findBestMatch(query, null);
+    // Search resources scoped to the selected admin
+    const match = await matchingService.findBestMatch(query, adminId || null);
 
     if (!match) {
       logger.info(`No matching resources found for query: "${query}"`);
@@ -321,7 +345,7 @@ router.post('/request', async (req, res) => {
       `📎 Download link: ${drive_id}`;
 
     await whatsapp.ready();
-    await whatsapp.sendMessage(normalizedPhone, messageText);
+    await whatsapp.sendMessageForAdmin(adminId || null, normalizedPhone, messageText);
 
     return res.status(200).json({
       message: 'Request processed and WhatsApp message sent successfully.',
