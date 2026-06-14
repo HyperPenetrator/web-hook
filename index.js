@@ -54,8 +54,8 @@ const whatsapp = require('./services/whatsappService');
 
 // ─── Security: HTTP headers ───────────────────────────────────────────────────
 app.use(helmet({
-  // Allow inline scripts/styles for the React SPA in production
-  contentSecurityPolicy: IS_PROD ? undefined : false,
+  // Allow inline scripts/styles for the React SPA and WhatsApp session console
+  contentSecurityPolicy: false,
 }));
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
