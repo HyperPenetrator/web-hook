@@ -91,7 +91,7 @@ HOST_URL=http://YOUR_SERVER_IP:3000
 
 # ── Supabase Credentials ──────────────────────────────────────────────────────
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 # ── Gemini API Credentials ───────────────────────────────────────────────────
 GEMINI_API_KEY=your-gemini-api-key
