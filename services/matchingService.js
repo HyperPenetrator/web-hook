@@ -73,4 +73,9 @@ async function findBestMatch(query, threshold = 0.6, count = 1) {
   return result;
 }
 
-module.exports = { findBestMatch };
+function clearCache() {
+  queryCache.clear();
+  logger.info('Query match cache cleared.');
+}
+
+module.exports = { findBestMatch, clearCache };

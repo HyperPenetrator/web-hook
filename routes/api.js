@@ -167,6 +167,9 @@ router.post('/admin/upload', authenticateAdmin, upload.single('file'), async (re
       throw new Error(`Supabase DB insert error: ${dbError.message}`);
     }
 
+    // Invalidate query match cache on new uploads
+    matchingService.clearCache();
+
     logger.info(`Resource "${fileName}" successfully indexed and saved to DB.`);
     return res.status(201).json({
       message: 'Resource uploaded and indexed successfully.',
