@@ -100,8 +100,7 @@ const requestLimiter = rateLimit({
   message: { error: 'Too many document requests. Please wait a minute and try again.' },
 });
 
-// Deprecated Local uploads static serving removed:
-// Files are now served directly and securely via Supabase Storage public links.
+
 
 // ─── API routes ───────────────────────────────────────────────────────────────
 const apiRouter = require('./routes/api');
