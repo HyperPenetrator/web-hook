@@ -28,6 +28,12 @@ function App() {
             >
               Admin Portal
             </NavLink>
+            <a
+              href="/admin/sessions.html"
+              className="nav-link"
+            >
+              WhatsApp Link
+            </a>
           </nav>
         </header>
 
