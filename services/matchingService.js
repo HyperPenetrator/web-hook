@@ -22,12 +22,12 @@ const CACHE_MAX_SIZE = 100;
  * similarity search against the `resources` table via the `match_resources` RPC.
  *
  * @param {string} query  - The user's natural-language request.
- * @param {number} [threshold=0.5] - Minimum similarity score (0–1).
+ * @param {number} [threshold=0.7] - Minimum similarity score (0–1).
  * @param {number} [count=1]       - Max number of results to return.
  * @returns {Promise<{ fileName: string, drive_id: string } | null>}
  *   The best matching resource, or null if nothing is above the threshold.
  */
-async function findBestMatch(query, threshold = 0.5, count = 1) {
+async function findBestMatch(query, threshold = 0.7, count = 1) {
   const cacheKey = (query || '').toLowerCase().trim();
   
   if (queryCache.has(cacheKey)) {
