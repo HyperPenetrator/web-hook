@@ -20,15 +20,18 @@ async function extractText(fileBuffer, mimeType, fileName) {
 
     if (mimeType === 'application/pdf') {
       logger.info(`Extracting text from PDF file: ${fileName}`);
-      let pdfData;
+      let pdfText = '';
       if (typeof pdfParse === 'function') {
-        pdfData = await pdfParse(fileBuffer);
+        const pdfData = await pdfParse(fileBuffer);
+        pdfText = pdfData.text || '';
       } else if (pdfParse && typeof pdfParse.PDFParse === 'function') {
-        pdfData = await pdfParse.PDFParse(fileBuffer);
+        const parser = new pdfParse.PDFParse(new Uint8Array(fileBuffer));
+        const result = await parser.getText();
+        pdfText = result.text || '';
       } else {
         throw new Error('pdf-parse package format unsupported (no function or PDFParse method found)');
       }
-      return pdfData.text || '';
+      return pdfText;
     }
 
     if (
