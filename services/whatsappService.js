@@ -256,11 +256,11 @@ async function connectBaileys() {
             `Try rephrasing your query (e.g., matching the keywords of the file you need).` + availableList;
         }
 
-        await sendMessage(senderPhone, replyText);
+        await sendMessage(senderJid, replyText);
         logger.info(`Successfully replied to ${senderPhone}`);
       } catch (err) {
         logger.error(`Error handling Baileys message from ${senderPhone}`, err);
-        await sendMessage(senderPhone, '⚠️ Something went wrong on my end. Please try again in a moment.').catch(() => {});
+        await sendMessage(senderJid, '⚠️ Something went wrong on my end. Please try again in a moment.').catch(() => {});
       }
     }
   });
