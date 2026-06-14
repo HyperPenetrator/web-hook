@@ -333,9 +333,22 @@ async function processQueue() {
       // 2.5-second pacing delay to mimic human behavior
       await new Promise((r) => setTimeout(r, 2500));
 
-      const jid = `${phone}@s.whatsapp.net`;
+      let jid = phone.includes('@') ? phone : `${phone}@s.whatsapp.net`;
+      
+      if (!phone.includes('@')) {
+        try {
+          const [result] = await sock.onWhatsApp([phone]);
+          if (result && result.exists) {
+            jid = result.jid;
+            logger.info(`Resolved phone number ${phone} to JID ${jid}`);
+          }
+        } catch (err) {
+          logger.warn(`Failed to resolve JID for ${phone} via onWhatsApp, using default JID format`, err);
+        }
+      }
+
       const result = await sock.sendMessage(jid, { text });
-      logger.info(`Baileys message sent to ${phone}`);
+      logger.info(`Baileys message sent to ${jid}`);
       resolve(result);
     } catch (error) {
       logger.error(`Baileys failed to send message to ${phone}`, error);

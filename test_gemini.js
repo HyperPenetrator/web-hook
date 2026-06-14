@@ -1,11 +1,11 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 require('dotenv').config();
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'AIzaSyD90Gpr_ZEhGAj_TlNjYVgYQHc3-4abjY8', { apiVersion: 'v1' });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY, { apiVersion: 'v1' });
 
 async function run() {
   try {
-    console.log('Testing Gemini API key:', process.env.GEMINI_API_KEY || 'AIzaSyD90Gpr_ZEhGAj_TlNjYVgYQHc3-4abjY8');
+    console.log('Testing Gemini API key:', process.env.GEMINI_API_KEY ? 'Present' : 'Missing');
     const model = genAI.getGenerativeModel({ model: 'text-embedding-004' });
     const result = await model.embedContent('Hello world');
     console.log('Success! Vector size:', result.embedding.values.length);
