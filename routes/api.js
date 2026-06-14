@@ -1,6 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { z } = require('zod');
 const { getSupabaseClient } = require('../services/supabaseClient');
 require('dotenv').config();
@@ -23,8 +24,6 @@ if (JWT_SECRET === 'eduhook-default-secret-key-change-in-prod') {
 if (ADMIN_PASSWORD === 'admin123') {
   logger.warn('WARNING: Using default ADMIN_PASSWORD ("admin123"). Please configure ADMIN_PASSWORD in your .env file.');
 }
-
-// Supabase client is initialized lazily inside routes where it's needed using getSupabaseClient()
 
 // Configure Multer for memory storage
 const ALLOWED_MIME_TYPES = new Set([
@@ -73,10 +72,82 @@ function authenticateAdmin(req, res, next) {
   }
 }
 
-// ─── POST /admin/login ────────────────────────────────────────────────────────
-router.post('/admin/login', (req, res) => {
+// ─── POST /admin/register ─────────────────────────────────────────────────────
+router.post('/admin/register', async (req, res) => {
   try {
     const schema = z.object({
+      email: z.string().email('Invalid email address'),
+      password: z.string().min(6, 'Password must be at least 6 characters')
+    });
+
+    const parseResult = schema.safeParse(req.body);
+    if (!parseResult.success) {
+      return res.status(400).json({ error: parseResult.error.errors[0].message });
+    }
+
+    const { email, password } = parseResult.data;
+    const supabase = getSupabaseClient();
+
+    // Generate password hash using Node pbkdf2
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+    const password_hash = `${salt}:${hash}`;
+
+    const { data, error } = await supabase
+      .from('admins')
+      .insert([{ email: email.toLowerCase().trim(), password_hash }])
+      .select('id, email')
+      .single();
+
+    if (error) {
+      // Check for duplicate key violation
+      if (error.code === '23505') {
+        return res.status(409).json({ error: 'An admin with this email already exists.' });
+      }
+      throw new Error(`Failed to register: ${error.message}`);
+    }
+
+    logger.info(`Registered new admin: ${email}`);
+    return res.status(201).json({ message: 'Admin registered successfully', admin: data });
+  } catch (error) {
+    logger.error('Error in POST /admin/register:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── POST /admin/login ────────────────────────────────────────────────────────
+router.post('/admin/login', async (req, res) => {
+  try {
+    // If the body doesn't contain email, it might be the legacy single admin password login
+    const isLegacyLogin = !req.body.email;
+
+    if (isLegacyLogin) {
+      const schema = z.object({
+        password: z.string().min(1, 'Password is required')
+      });
+      const parseResult = schema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ error: parseResult.error.errors[0].message });
+      }
+
+      const { password } = parseResult.data;
+      if (password !== ADMIN_PASSWORD) {
+        logger.warn('Failed admin login attempt (legacy password).');
+        return res.status(401).json({ error: 'Invalid credentials.' });
+      }
+
+      const token = jwt.sign(
+        { id: '00000000-0000-0000-0000-000000000000', email: 'legacy-admin@local', role: 'admin' },
+        JWT_SECRET,
+        { expiresIn: '2h' }
+      );
+      logger.info('Successful legacy admin login.');
+      return res.json({ token });
+    }
+
+    // Standard Multi-Admin Email/Password login
+    const schema = z.object({
+      email: z.string().email('Invalid email address'),
       password: z.string().min(1, 'Password is required')
     });
     
@@ -85,15 +156,49 @@ router.post('/admin/login', (req, res) => {
       return res.status(400).json({ error: parseResult.error.errors[0].message });
     }
 
-    const { password } = parseResult.data;
-    if (password !== ADMIN_PASSWORD) {
-      logger.warn('Failed admin login attempt.');
+    const { email, password } = parseResult.data;
+    const supabase = getSupabaseClient();
+
+    const { data: admin, error } = await supabase
+      .from('admins')
+      .select('*')
+      .eq('email', email.toLowerCase().trim())
+      .maybeSingle();
+
+    if (error) {
+      // Graceful fallback to legacy single-user password if migration hasn't been executed
+      if (error.code === '42P01') {
+        logger.warn('Database "admins" table not found. Falling back to single-user authentication.');
+        if (password === ADMIN_PASSWORD) {
+          const token = jwt.sign(
+            { id: '00000000-0000-0000-0000-000000000000', email: 'legacy-admin@local', role: 'admin' },
+            JWT_SECRET,
+            { expiresIn: '2h' }
+          );
+          return res.json({ token });
+        }
+        return res.status(401).json({ error: 'Invalid credentials.' });
+      }
+      throw new Error(`Database error: ${error.message}`);
+    }
+
+    if (!admin) {
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
 
-    // Issue token expiring in 2 hours
-    const token = jwt.sign({ role: 'admin' }, JWT_SECRET, { expiresIn: '2h' });
-    logger.info('Successful admin login.');
+    const [salt, storedHash] = admin.password_hash.split(':');
+    const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+
+    if (hash !== storedHash) {
+      return res.status(401).json({ error: 'Invalid credentials.' });
+    }
+
+    const token = jwt.sign(
+      { id: admin.id, email: admin.email, role: 'admin' },
+      JWT_SECRET,
+      { expiresIn: '2h' }
+    );
+    logger.info(`Successful login for admin: ${email}`);
     return res.json({ token });
   } catch (error) {
     logger.error('Error in POST /admin/login:', error);
@@ -102,8 +207,6 @@ router.post('/admin/login', (req, res) => {
 });
 
 // ─── POST /admin/upload ────────────────────────────────────────────────────────
-// Accepts a file and optional tags string. Protected by auth.
-// Uploads directly to Supabase Storage, parses text, generates Gemini embedding, stores metadata in DB.
 router.post('/admin/upload', authenticateAdmin, upload.single('file'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file provided.' });
@@ -114,14 +217,12 @@ router.post('/admin/upload', authenticateAdmin, upload.single('file'), async (re
 
   try {
     const supabase = getSupabaseClient();
-    // 1. Generate unique file name to prevent collisons in storage
     const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
     const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
     const storagePath = `${uniqueSuffix}-${sanitizedFileName}`;
 
     logger.info(`Uploading file ${fileName} to Supabase Storage as ${storagePath}...`);
 
-    // 2. Upload file directly to Supabase storage bucket 'documents'
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('documents')
       .upload(storagePath, fileBuffer, {
@@ -133,7 +234,6 @@ router.post('/admin/upload', authenticateAdmin, upload.single('file'), async (re
       throw new Error(`Supabase storage upload failed: ${uploadError.message}`);
     }
 
-    // 3. Retrieve public URL
     const { data: urlData } = supabase.storage
       .from('documents')
       .getPublicUrl(storagePath);
@@ -141,33 +241,31 @@ router.post('/admin/upload', authenticateAdmin, upload.single('file'), async (re
     const publicUrl = urlData.publicUrl;
     logger.info(`File uploaded successfully. Public URL: ${publicUrl}`);
 
-    // 4. Extract document text content for high-fidelity indexing
     const extractedText = await parserService.extractText(fileBuffer, mimeType, fileName);
     
-    // Combine filename, tags, and extracted document text to give AI maximum context
     let textToEmbed = `File Name: ${fileName}\n`;
     if (tags) textToEmbed += `Keywords: ${tags}\n`;
     if (extractedText) {
       textToEmbed += `Content Preview:\n${extractedText}`;
-    } else {
-      logger.info('No document content extracted; indexing using filename and tags only.');
     }
 
-    // 5. Generate Gemini API vector embedding
     const embedding = await embeddingService.generateEmbedding(textToEmbed);
 
-    // 6. Save metadata and embedding in Supabase resources DB table
+    const resourceRow = { drive_id: publicUrl, name: fileName, embedding };
+    // Tie resource to logged-in admin if ID is not legacy
+    if (req.admin && req.admin.id !== '00000000-0000-0000-0000-000000000000') {
+      resourceRow.admin_id = req.admin.id;
+    }
+
     const { error: dbError } = await supabase
       .from('resources')
-      .insert([{ drive_id: publicUrl, name: fileName, embedding }]);
+      .insert([resourceRow]);
 
     if (dbError) {
-      // Cleanup uploaded file on DB failure
       await supabase.storage.from('documents').remove([storagePath]).catch(() => {});
       throw new Error(`Supabase DB insert error: ${dbError.message}`);
     }
 
-    // Invalidate query match cache on new uploads
     matchingService.clearCache();
 
     logger.info(`Resource "${fileName}" successfully indexed and saved to DB.`);
@@ -183,8 +281,6 @@ router.post('/admin/upload', authenticateAdmin, upload.single('file'), async (re
 });
 
 // ─── POST /request ──────────────────────────────────────────────────────────
-// Accepts name, phone, query. Finds the best matching resource via semantic
-// search and sends a WhatsApp message with the download link.
 router.post('/request', async (req, res) => {
   try {
     const schema = z.object({
@@ -201,7 +297,6 @@ router.post('/request', async (req, res) => {
 
     let { name, phone, query } = parseResult.data;
     
-    // Sanitize input
     name = name.replace(/[\r\n\t]+/g, ' ').trim();
     phone = phone.replace(/[\s\r\n\t]+/g, '').trim();
     query = query.replace(/[\r\n\t]+/g, ' ').trim();
@@ -210,8 +305,8 @@ router.post('/request', async (req, res) => {
 
     logger.info(`Received API request from ${name} (${normalizedPhone}): "${query}"`);
 
-    // Find closest match
-    const match = await matchingService.findBestMatch(query);
+    // Public request queries across all resources (passing null for adminId)
+    const match = await matchingService.findBestMatch(query, null);
 
     if (!match) {
       logger.info(`No matching resources found for query: "${query}"`);
@@ -237,4 +332,5 @@ router.post('/request', async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 });
+
 module.exports = router;

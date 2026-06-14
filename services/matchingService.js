@@ -2,11 +2,11 @@
  * matchingService.js
  *
  * Shared resource-matching logic used by both:
- *  - the WhatsApp bot (incoming message handler in whatsappService.js)
+ *  - the WhatsApp bot (incoming message handler in whatsappSessionManager.js)
  *  - the HTTP API route (POST /api/request)
  *
  * Exports:
- *   findBestMatch(query) → { fileName, drive_id } | null
+ *   findBestMatch(query, adminId) → { fileName, drive_id } | null
  */
 
 const { getSupabaseClient } = require('./supabaseClient');
@@ -14,22 +14,28 @@ const embeddingService = require('./embeddingService');
 const logger = require('./logger');
 require('dotenv').config();
 
-// Cache object to store query matches (key: query.toLowerCase().trim(), value: match)
+// Cache object to store query matches (key: adminId_query, value: match)
 const queryCache = new Map();
 const CACHE_MAX_SIZE = 100;
 
 /**
  * Converts a free-text query into a vector embedding, then runs a cosine-
- * similarity search against the `resources` table via the `match_resources` RPC.
+ * similarity search against the `resources` table via pgvector.
+ * Supports multi-admin isolation by filtering on adminId if provided.
  *
  * @param {string} query  - The user's natural-language request.
- * @param {number} [threshold=0.7] - Minimum similarity score (0–1).
+ * @param {string|null} [adminId=null] - The ID of the admin session for scoping search.
+ * @param {number} [threshold=0.55] - Minimum similarity score (0–1).
  * @param {number} [count=1]       - Max number of results to return.
  * @returns {Promise<{ fileName: string, drive_id: string } | null>}
  *   The best matching resource, or null if nothing is above the threshold.
  */
-async function findBestMatch(query, threshold = 0.55, count = 1) {
-  const cacheKey = (query || '').toLowerCase().trim();
+async function findBestMatch(query, adminId = null, threshold = 0.55, count = 1) {
+  // Translate legacy default UUID to null for global search fallback
+  const effectiveAdminId = (adminId === '00000000-0000-0000-0000-000000000000') ? null : adminId;
+
+  // Build secure composite cache key to isolate caching per admin
+  const cacheKey = `${effectiveAdminId || 'all'}_${(query || '').toLowerCase().trim()}`;
   
   if (queryCache.has(cacheKey)) {
     return queryCache.get(cacheKey);
@@ -38,20 +44,43 @@ async function findBestMatch(query, threshold = 0.55, count = 1) {
   // 1. Embed the query
   const queryEmbedding = await embeddingService.generateEmbedding(query);
 
-  // 2. Run pgvector similarity search with 0.0 threshold
+  // 2. Run pgvector similarity search
   const supabase = getSupabaseClient();
-  const { data: matches, error } = await supabase.rpc('match_resources', {
-    query_embedding: queryEmbedding,
-    match_threshold: 0.0,
-    match_count: 5,
-  });
+  let matches = null;
+  let error = null;
 
-  if (error) {
-    throw new Error(`Supabase RPC error: ${error.message}`);
+  // Try calling the new match_resources_v2 function first
+  try {
+    const res = await supabase.rpc('match_resources_v2', {
+      query_embedding: queryEmbedding,
+      match_threshold: 0.0,
+      match_count: 5,
+      p_admin_id: effectiveAdminId,
+    });
+    matches = res.data;
+    error = res.error;
+  } catch (err) {
+    logger.warn('Error invoking match_resources_v2 RPC, will attempt fallback:', err);
+  }
+
+  // Fallback to legacy function if v2 function is missing or returns error code
+  if (error || !matches) {
+    logger.info('Falling back to legacy match_resources function (no admin-scoping)...');
+    const res = await supabase.rpc('match_resources', {
+      query_embedding: queryEmbedding,
+      match_threshold: 0.0,
+      match_count: 5,
+    });
+    matches = res.data;
+    error = res.error;
+
+    if (error) {
+      throw new Error(`Legacy match_resources RPC failed: ${error.message}`);
+    }
   }
 
   if (matches) {
-    logger.info(`Database match query raw similarity scores: ${JSON.stringify(matches.map(m => ({ name: m.name, similarity: m.similarity })))}`);
+    logger.info(`Similarity scores [admin:${effectiveAdminId || 'all'}]: ${JSON.stringify(matches.map(m => ({ name: m.name, similarity: m.similarity })))}`);
   }
 
   let result = null;
@@ -67,7 +96,7 @@ async function findBestMatch(query, threshold = 0.55, count = 1) {
     }
   }
 
-  // Manage cache size
+  // Manage cache size limits
   if (queryCache.size >= CACHE_MAX_SIZE) {
     const firstKey = queryCache.keys().next().value;
     queryCache.delete(firstKey);

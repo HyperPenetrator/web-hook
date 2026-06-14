@@ -7,7 +7,7 @@ const logger = require('../services/logger');
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'eduhook-default-secret-key-change-in-prod';
 
-// Map to track SSE connections: Map<sessionId, Set<res>>
+// Map to track SSE connections: Map<fullSessionId, Set<res>>
 const sseConnections = new Map();
 
 // Middleware: Authenticate admin via Bearer header or query parameter (for SSE)
@@ -35,9 +35,9 @@ function authenticateAdmin(req, res, next) {
   }
 }
 
-// Helper to broadcast event to all SSE connections for a sessionId
-function broadcastToSession(sessionId, eventName, data) {
-  const connections = sseConnections.get(sessionId);
+// Helper to broadcast event to all SSE connections for a fullSessionId
+function broadcastToSession(fullSessionId, eventName, data) {
+  const connections = sseConnections.get(fullSessionId);
   if (connections && connections.size > 0) {
     const message = `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
     connections.forEach(res => {
@@ -65,21 +65,21 @@ sessionManager.on('session:removed', ({ sessionId }) => {
 
 /**
  * GET /admin/sessions
- * Returns lists of all active sessions.
+ * Returns lists of all active sessions belonging to the logged-in admin.
  */
 router.get('/sessions', authenticateAdmin, (req, res) => {
   try {
-    const list = sessionManager.listSessions();
+    const list = sessionManager.listSessions(req.admin.id);
     res.json(list);
   } catch (err) {
-    logger.error('Error listing sessions:', err);
+    logger.error(`Error listing sessions for admin ${req.admin.id}:`, err);
     res.status(500).json({ error: 'Failed to list sessions' });
   }
 });
 
 /**
  * POST /admin/sessions
- * Creates a new session.
+ * Creates a new session scoped to the logged-in admin.
  */
 router.post('/sessions', authenticateAdmin, async (req, res) => {
   try {
@@ -90,25 +90,30 @@ router.post('/sessions', authenticateAdmin, async (req, res) => {
       sessionId = sessionId.trim().replace(/[^a-zA-Z0-9_-]/g, '');
     }
 
-    const sessionObj = await sessionManager.createSession(sessionId);
+    // Prepend admin ID to isolate files and active session namespaces
+    const fullSessionId = `${req.admin.id}_${sessionId}`;
+
+    await sessionManager.createSession(fullSessionId);
     res.json({
-      sessionId,
+      sessionId, // return short ID to clean up UI display
+      fullId: fullSessionId,
       eventsUrl: `/admin/sessions/${sessionId}/events`
     });
   } catch (err) {
-    logger.error('Error creating session:', err);
+    logger.error(`Error creating session for admin ${req.admin.id}:`, err);
     res.status(500).json({ error: 'Failed to create session' });
   }
 });
 
 /**
  * GET /admin/sessions/:id/events
- * SSE stream to receive live session updates (QR codes, connection state).
+ * SSE stream to receive live session updates (QR codes, connection state) for this admin.
  */
 router.get('/sessions/:id/events', authenticateAdmin, (req, res) => {
-  const sessionId = req.params.id;
+  const shortId = req.params.id;
+  const fullSessionId = `${req.admin.id}_${shortId}`;
 
-  const session = sessionManager.getSession(sessionId);
+  const session = sessionManager.getSession(fullSessionId);
   if (!session) {
     return res.status(404).json({ error: 'Session not found' });
   }
@@ -118,10 +123,9 @@ router.get('/sessions/:id/events', authenticateAdmin, (req, res) => {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive',
-    'X-Accel-Buffering': 'no' // Prevent Nginx buffer buffering SSE
+    'X-Accel-Buffering': 'no'
   });
 
-  // Write immediate state reply
   res.write(`: open connection\n\n`);
   
   if (session.status === 'connected') {
@@ -132,24 +136,23 @@ router.get('/sessions/:id/events', authenticateAdmin, (req, res) => {
     res.write(`event: state\ndata: ${JSON.stringify({ status: session.status })}\n\n`);
   }
 
-  // Register connection
-  if (!sseConnections.has(sessionId)) {
-    sseConnections.set(sessionId, new Set());
+  // Register connection using the tenant-isolated full session ID
+  if (!sseConnections.has(fullSessionId)) {
+    sseConnections.set(fullSessionId, new Set());
   }
-  sseConnections.get(sessionId).add(res);
+  sseConnections.get(fullSessionId).add(res);
 
-  // Keep-alive heartbeat (25s ping)
   const heartbeat = setInterval(() => {
     res.write(':ping\n\n');
   }, 25000);
 
   req.on('close', () => {
     clearInterval(heartbeat);
-    const connections = sseConnections.get(sessionId);
+    const connections = sseConnections.get(fullSessionId);
     if (connections) {
       connections.delete(res);
       if (connections.size === 0) {
-        sseConnections.delete(sessionId);
+        sseConnections.delete(fullSessionId);
       }
     }
   });
@@ -161,16 +164,18 @@ router.get('/sessions/:id/events', authenticateAdmin, (req, res) => {
  */
 router.delete('/sessions/:id', authenticateAdmin, async (req, res) => {
   try {
-    const sessionId = req.params.id;
-    const session = sessionManager.getSession(sessionId);
+    const shortId = req.params.id;
+    const fullSessionId = `${req.admin.id}_${shortId}`;
+
+    const session = sessionManager.getSession(fullSessionId);
     if (!session) {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    await sessionManager.removeSession(sessionId);
-    res.json({ success: true, message: `Session ${sessionId} removed.` });
+    await sessionManager.removeSession(fullSessionId);
+    res.json({ success: true, message: `Session ${shortId} removed.` });
   } catch (err) {
-    logger.error(`Error deleting session ${req.params.id}:`, err);
+    logger.error(`Error deleting session ${req.params.id} for admin ${req.admin.id}:`, err);
     res.status(500).json({ error: 'Failed to delete session' });
   }
 });

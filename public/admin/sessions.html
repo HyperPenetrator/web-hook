@@ -454,10 +454,14 @@
     <div class="modal-box">
       <h3 style="margin-bottom: 16px; text-align: center;">Console Authentication</h3>
       <p style="color: var(--text-secondary); font-size: 0.9rem; text-align: center; margin-bottom: 24px;">
-        Please enter your admin password to access the WhatsApp session management dashboard.
+        Please enter your admin email and password to access the WhatsApp session management dashboard.
       </p>
+      <div class="form-group" style="margin-bottom: 16px;">
+        <label class="form-label" for="input-admin-email">Email Address</label>
+        <input type="email" class="form-input" id="input-admin-email" placeholder="admin@school.edu">
+      </div>
       <div class="form-group" style="margin-bottom: 20px;">
-        <label class="form-label" for="input-admin-password">Admin Password</label>
+        <label class="form-label" for="input-admin-password">Password</label>
         <input type="password" class="form-input" id="input-admin-password" placeholder="••••••••">
         <span id="login-error-msg" style="color: var(--status-disconnected); font-size: 0.8rem; margin-top: 4px; display: none;"></span>
       </div>
@@ -600,6 +604,8 @@
 
     // Login Submission
     async function handleLogin() {
+      const emailInput = document.getElementById('input-admin-email');
+      const email = emailInput ? emailInput.value.trim() : '';
       const password = inputAdminPassword.value;
       loginErrorMsg.style.display = 'none';
 
@@ -607,13 +613,14 @@
         const res = await fetch('/api/admin/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password })
+          body: JSON.stringify({ email, password })
         });
 
         const data = await res.json();
         if (res.ok && data.token) {
           localStorage.setItem('adminToken', data.token);
           modalLogin.classList.remove('active');
+          if (emailInput) emailInput.value = '';
           inputAdminPassword.value = '';
           loadSessions();
         } else {

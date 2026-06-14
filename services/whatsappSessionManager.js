@@ -3,7 +3,7 @@
  *
  * Singleton session manager service that owns all Baileys sockets.
  * It manages multiple WhatsApp accounts simultaneously, saving auth data for each
- * in 'auth_sessions/<sessionId>'.
+ * in 'auth_sessions/<adminId>_<sessionSlug>'.
  */
 
 if (typeof globalThis.WebSocket === 'undefined') {
@@ -42,10 +42,8 @@ class WhatsAppSessionManager extends EventEmitter {
     super();
     // Map<sessionId, { sock, status, phone, qrDataURL, connectedAt }>
     this.sessions = new Map();
-    // Keep track of reconnect timers and back-off delays: Map<sessionId, { timer, delay }>
     this.reconnectStates = new Map();
-    // A single queue per session or global? Let's implement queueing per session to pace outbound messages.
-    this.messageQueues = new Map(); // Map<sessionId, { queue: [], processing: boolean }>
+    this.messageQueues = new Map();
   }
 
   /**
@@ -76,13 +74,23 @@ class WhatsAppSessionManager extends EventEmitter {
   }
 
   /**
-   * Lists all sessions as serializable data.
+   * Lists all sessions, optionally filtered by admin ID.
    */
-  listSessions() {
+  listSessions(adminId = null) {
     const list = [];
+    const targetPrefix = adminId ? `${adminId}_` : null;
+
     for (const [id, session] of this.sessions.entries()) {
+      if (targetPrefix && !id.startsWith(targetPrefix)) {
+        continue;
+      }
+
+      // Strip the prefix for display on the front-end to keep UI clean
+      const displayId = targetPrefix ? id.substring(targetPrefix.length) : id;
+
       list.push({
-        id,
+        id: displayId,
+        fullId: id,
         status: session.status,
         phone: session.phone,
         connectedAt: session.connectedAt,
@@ -105,13 +113,19 @@ class WhatsAppSessionManager extends EventEmitter {
   async createSession(sessionId) {
     if (this.sessions.has(sessionId)) {
       const existing = this.sessions.get(sessionId);
-      // If it's already active/connected, just return it
       if (existing.status === 'connected') {
         return existing;
       }
     }
 
-    logger.info(`Creating WhatsApp session: ${sessionId}`);
+    // Extract adminId from sessionId prefix to handle database query scoping
+    const underscoreIndex = sessionId.indexOf('_');
+    let adminId = '00000000-0000-0000-0000-000000000000';
+    if (underscoreIndex !== -1) {
+      adminId = sessionId.substring(0, underscoreIndex);
+    }
+
+    logger.info(`Creating WhatsApp session: ${sessionId} (Admin: ${adminId})`);
 
     const sessionDir = path.join(AUTH_SESSIONS_DIR, sessionId);
     if (!fs.existsSync(sessionDir)) {
@@ -132,7 +146,6 @@ class WhatsAppSessionManager extends EventEmitter {
       getMessage: async () => undefined,
     });
 
-    // Initialize session structure
     const sessionObj = {
       sock,
       status: 'connecting',
@@ -142,7 +155,6 @@ class WhatsAppSessionManager extends EventEmitter {
     };
     this.sessions.set(sessionId, sessionObj);
 
-    // Set up message queue state for this session
     if (!this.messageQueues.has(sessionId)) {
       this.messageQueues.set(sessionId, { queue: [], processing: false });
     }
@@ -164,7 +176,6 @@ class WhatsAppSessionManager extends EventEmitter {
       }
 
       if (connection === 'open') {
-        // Clear reconnect back-off on success
         this.reconnectStates.delete(sessionId);
         
         sessionObj.status = 'connected';
@@ -190,7 +201,6 @@ class WhatsAppSessionManager extends EventEmitter {
         this.emit('session:disconnected', { sessionId, statusCode });
 
         if (shouldReconnect) {
-          // Exponential backoff reconnect
           let reconnectState = this.reconnectStates.get(sessionId);
           if (!reconnectState) {
             reconnectState = { delay: 3000 };
@@ -220,8 +230,8 @@ class WhatsAppSessionManager extends EventEmitter {
 
       for (const msg of messages) {
         if (msg.key.fromMe) continue;
-        if (msg.key.remoteJid.endsWith('@g.us')) continue; // Skip groups
-        if (msg.key.remoteJid === 'status@broadcast') continue; // Skip statuses
+        if (msg.key.remoteJid.endsWith('@g.us')) continue;
+        if (msg.key.remoteJid === 'status@broadcast') continue;
 
         const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || null;
         if (!text) continue;
@@ -233,7 +243,8 @@ class WhatsAppSessionManager extends EventEmitter {
         this.emit('session:message', { sessionId, senderJid, senderPhone, text });
 
         try {
-          const match = await matchingService.findBestMatch(text);
+          // Pass the adminId to scope matching results to this specific admin tenant!
+          const match = await matchingService.findBestMatch(text, adminId);
           let replyText;
           if (match) {
             replyText =
@@ -243,12 +254,17 @@ class WhatsAppSessionManager extends EventEmitter {
             let availableList = '';
             try {
               const supabaseClient = getSupabaseClient();
-              const { data } = await supabaseClient.from('resources').select('name').limit(15);
+              const { data } = await supabaseClient
+                .from('resources')
+                .select('name')
+                .eq('admin_id', adminId) // Fetch only documents belonging to this admin
+                .limit(15);
+
               if (data && data.length > 0) {
                 availableList = '\n\n📁 *Available documents in database:*\n' + data.map(r => `• ${r.name}`).join('\n');
               }
             } catch (dbErr) {
-              logger.error('Failed to retrieve resource list for WhatsApp fallback:', dbErr);
+              logger.error(`Failed to retrieve resource list for session ${sessionId} fallback:`, dbErr);
             }
 
             replyText =
@@ -274,7 +290,6 @@ class WhatsAppSessionManager extends EventEmitter {
   async removeSession(sessionId) {
     logger.info(`Removing session ${sessionId}`);
 
-    // Clear reconnect timer
     const reconnectState = this.reconnectStates.get(sessionId);
     if (reconnectState && reconnectState.timer) {
       clearTimeout(reconnectState.timer);
@@ -296,11 +311,9 @@ class WhatsAppSessionManager extends EventEmitter {
 
     this.messageQueues.delete(sessionId);
 
-    // Delete auth files directory
     const sessionDir = path.join(AUTH_SESSIONS_DIR, sessionId);
     if (fs.existsSync(sessionDir)) {
       try {
-        // Wait briefly to release file locks, then delete
         await new Promise(resolve => setTimeout(resolve, 500));
         fs.rmSync(sessionDir, { recursive: true, force: true });
         logger.info(`Successfully deleted auth folder for session ${sessionId}`);
@@ -356,7 +369,6 @@ class WhatsAppSessionManager extends EventEmitter {
     while (qState.queue.length > 0) {
       const { jid, text, resolve, reject } = qState.queue.shift();
       try {
-        // 2.5-second pacing delay to mimic human behavior
         await new Promise((r) => setTimeout(r, 2500));
 
         if (!session || !session.sock) {
@@ -376,6 +388,5 @@ class WhatsAppSessionManager extends EventEmitter {
   }
 }
 
-// Export singleton instance
 const sessionManager = new WhatsAppSessionManager();
 module.exports = sessionManager;
