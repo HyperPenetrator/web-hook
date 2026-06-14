@@ -38,12 +38,12 @@ async function findBestMatch(query, threshold = 0.6, count = 1) {
   // 1. Embed the query
   const queryEmbedding = await embeddingService.generateEmbedding(query);
 
-  // 2. Run pgvector similarity search
+  // 2. Run pgvector similarity search with 0.0 threshold
   const supabase = getSupabaseClient();
   const { data: matches, error } = await supabase.rpc('match_resources', {
     query_embedding: queryEmbedding,
-    match_threshold: threshold,
-    match_count: count,
+    match_threshold: 0.0,
+    match_count: 5,
   });
 
   if (error) {
@@ -51,16 +51,20 @@ async function findBestMatch(query, threshold = 0.6, count = 1) {
   }
 
   if (matches) {
-    logger.info(`Database match query similarity scores: ${JSON.stringify(matches.map(m => ({ name: m.name, similarity: m.similarity })))}`);
+    logger.info(`Database match query raw similarity scores: ${JSON.stringify(matches.map(m => ({ name: m.name, similarity: m.similarity })))}`);
   }
 
   let result = null;
   if (matches && matches.length > 0) {
     const best = matches[0];
-    result = {
-      fileName: best.name,
-      drive_id: best.drive_id,
-    };
+    if (best.similarity >= threshold) {
+      result = {
+        fileName: best.name,
+        drive_id: best.drive_id,
+      };
+    } else {
+      logger.info(`Best match "${best.name}" similarity (${best.similarity}) was below threshold (${threshold})`);
+    }
   }
 
   // Manage cache size
