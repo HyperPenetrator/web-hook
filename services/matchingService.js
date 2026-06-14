@@ -27,7 +27,7 @@ const CACHE_MAX_SIZE = 100;
  * @returns {Promise<{ fileName: string, drive_id: string } | null>}
  *   The best matching resource, or null if nothing is above the threshold.
  */
-async function findBestMatch(query, threshold = 0.7, count = 1) {
+async function findBestMatch(query, threshold = 0.6, count = 1) {
   const cacheKey = (query || '').toLowerCase().trim();
   
   if (queryCache.has(cacheKey)) {
