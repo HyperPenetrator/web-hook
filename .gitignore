@@ -1,6 +1,6 @@
 node_modules/
 uploads/
-
+context.md
 # Baileys WhatsApp session (contains private keys — never commit)
 whatsapp_auth_state/
 
