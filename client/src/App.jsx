@@ -29,7 +29,7 @@ function App() {
               Admin Portal
             </NavLink>
             <a
-              href="/admin/sessions.html"
+              href={`${import.meta.env.VITE_API_URL || ''}/admin/sessions.html`}
               className="nav-link"
             >
               WhatsApp Link
