@@ -108,6 +108,11 @@ const apiRouter = require('./routes/api');
 app.use('/api/request', requestLimiter); // apply strict limiter to send endpoint
 app.use('/api', apiRouter);
 
+// ─── Admin Panel Multi-Number Session routes ──────────────────────────────────
+const adminSessions = require('./routes/adminSessions');
+app.use('/admin', adminSessions);
+app.use('/admin', express.static(path.join(__dirname, 'public/admin')));
+
 // ─── WhatsApp status endpoint ─────────────────────────────────────────────────
 app.get('/whatsapp/status', (req, res) => {
   const connected = whatsapp.getStatus();
@@ -153,13 +158,17 @@ app.use((err, req, res, next) => {
 // ─── Start server ─────────────────────────────────────────────────────────────
 let server;
 if (require.main === module) {
-  server = app.listen(PORT, '0.0.0.0', () => {
+  server = app.listen(PORT, '0.0.0.0', async () => {
     logger.info(`EduHook Link server running on port ${PORT}`);
     logger.info(`Mode    : ${IS_PROD ? 'production' : 'development'}`);
     logger.info(`Status  : http://localhost:${PORT}/whatsapp/status`);
     if (IS_PROD && fs.existsSync(clientDist)) {
       logger.info(`Frontend: http://localhost:${PORT}/`);
     }
+
+    // Re-hydrate persisted sessions on boot
+    const sessionManager = require('./services/whatsappSessionManager');
+    await sessionManager.restorePersistedSessions();
   });
 
   // ─── Graceful shutdown ──────────────────────────────────────────────────────

@@ -21,10 +21,11 @@ The backend extracts text from uploaded documents (PDF, DOCX, TXT) and indexes t
 ## 🚀 Key Features
 
 * **AI-Powered Semantic Search:** Students search naturally (*"leave application"*, *"exam timetable"*). The system matches requests using Gemini vector embeddings and PostgreSQL `pgvector` similarity search.
-* **Free WhatsApp Delivery (Baileys WA Web Client):** Runs completely free by connecting to a standard WhatsApp line (personal or business) via a QR-code scan in the terminal. No paid enterprise API or template constraints are required.
-* **Pacing & Anti-Spam Queue:** Includes an automatic in-memory queue that processes and throttles outbound message dispatches with a 2.5-second delay to protect the WhatsApp account from automated spam filters.
-* **Database-Backed Session Persistence:** WhatsApp authentication state is automatically saved to Supabase (`whatsapp_auth` table). Ephemeral cloud servers (like Hugging Face Spaces free tier) will remain authenticated across restarts without requiring re-scans.
-* **Secure Admin Upload Portal:** Features password protection, JWT-based session tokens, strict input validation via `zod`, and uploads directly to cloud storage.
+* **Multi-Session WhatsApp Support:** Run multiple WhatsApp accounts simultaneously. Scan, link, and disconnect numbers dynamically.
+* **Secure Admin Console Dashboard:** A gorgeous, vanilla JS admin dashboard page at `/admin` (mapped to `/admin/sessions.html`) protected by JWT password authentication to manage and link active numbers in real-time.
+* **Pacing & Anti-Spam Queue:** Includes an automatic in-memory queue per session that processes and throttles outbound message dispatches with a 2.5-second delay to protect WhatsApp accounts from automated spam filters.
+* **Local Session Persistence:** Multi-device session authorization states are persisted under `auth_sessions/` directories and automatically restored when the backend boots.
+* **Secure Admin Upload Portal:** Features password protection, JWT-based session tokens, strict input validation via `zod`, and uploads directly to Supabase cloud storage.
 * **Supabase Storage Integration:** Eliminates local filesystem storage (`/uploads`), permitting seamless horizontal scaling.
 * **Production Logging & Alerting:** Structured JSON logs via `pino`, Sentry error tracking, and administrative notification webhooks (Slack/Discord) for critical failures.
 

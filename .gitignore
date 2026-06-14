@@ -3,6 +3,7 @@ uploads/
 context.md
 # Baileys WhatsApp session (contains private keys — never commit)
 whatsapp_auth_state/
+auth_sessions/
 
 # Google service account credentials (never commit)
 google-credentials.json
@@ -18,6 +19,7 @@ client/dist/
 
 # PM2 logs
 logs/
+logs.*.json
 
 # OS artifacts
 .DS_Store
