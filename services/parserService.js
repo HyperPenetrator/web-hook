@@ -20,7 +20,14 @@ async function extractText(fileBuffer, mimeType, fileName) {
 
     if (mimeType === 'application/pdf') {
       logger.info(`Extracting text from PDF file: ${fileName}`);
-      const pdfData = await pdfParse(fileBuffer);
+      let pdfData;
+      if (typeof pdfParse === 'function') {
+        pdfData = await pdfParse(fileBuffer);
+      } else if (pdfParse && typeof pdfParse.PDFParse === 'function') {
+        pdfData = await pdfParse.PDFParse(fileBuffer);
+      } else {
+        throw new Error('pdf-parse package format unsupported (no function or PDFParse method found)');
+      }
       return pdfData.text || '';
     }
 
