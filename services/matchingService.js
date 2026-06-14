@@ -11,6 +11,7 @@
 
 const { getSupabaseClient } = require('./supabaseClient');
 const embeddingService = require('./embeddingService');
+const logger = require('./logger');
 require('dotenv').config();
 
 // Cache object to store query matches (key: query.toLowerCase().trim(), value: match)
