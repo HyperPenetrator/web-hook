@@ -328,30 +328,16 @@ async function processQueue() {
   isProcessingQueue = true;
 
   while (messageQueue.length > 0) {
-    const { phone, text, resolve, reject } = messageQueue.shift();
+    const { jid, text, resolve, reject } = messageQueue.shift();
     try {
       // 2.5-second pacing delay to mimic human behavior
       await new Promise((r) => setTimeout(r, 2500));
-
-      let jid = phone.includes('@') ? phone : `${phone}@s.whatsapp.net`;
-      
-      if (!phone.includes('@')) {
-        try {
-          const [result] = await sock.onWhatsApp([phone]);
-          if (result && result.exists) {
-            jid = result.jid;
-            logger.info(`Resolved phone number ${phone} to JID ${jid}`);
-          }
-        } catch (err) {
-          logger.warn(`Failed to resolve JID for ${phone} via onWhatsApp, using default JID format`, err);
-        }
-      }
 
       const result = await sock.sendMessage(jid, { text });
       logger.info(`Baileys message sent to ${jid}`);
       resolve(result);
     } catch (error) {
-      logger.error(`Baileys failed to send message to ${phone}`, error);
+      logger.error(`Baileys failed to send message to ${jid}`, error);
       reject(error);
     }
   }
@@ -369,8 +355,23 @@ async function sendMessage(phone, text) {
   if (!isConnected || !sock) {
     throw new Error('WhatsApp client is not connected via Baileys. Cannot send message.');
   }
+
+  let jid = phone.includes('@') ? phone : `${phone}@s.whatsapp.net`;
+  
+  if (!phone.includes('@')) {
+    try {
+      const [result] = await sock.onWhatsApp([phone]);
+      if (result && result.exists) {
+        jid = result.jid;
+        logger.info(`Resolved phone number ${phone} to JID ${jid}`);
+      }
+    } catch (err) {
+      logger.warn(`Failed to resolve JID for ${phone} via onWhatsApp, using default JID format`, err);
+    }
+  }
+
   return new Promise((resolve, reject) => {
-    messageQueue.push({ phone, text, resolve, reject });
+    messageQueue.push({ jid, text, resolve, reject });
     processQueue();
   });
 }
